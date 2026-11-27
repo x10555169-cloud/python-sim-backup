@@ -126,3 +126,9 @@ details.des-adv[open]>summary{border-bottom:1px solid var(--line);margin-bottom:
 #desRecent td,#desRecent th{text-align:left}
 .des-legend i.busy{background:var(--busy)}.des-legend i.blk{background:var(--blk)}.des-legend i.idle{background:var(--idle)}
 #desRecent td.des-set{white-space:normal;min-width:140px}
+/* 甘特圖 */
+.des-chart .gtrack{fill:var(--line);opacity:.35}
+.des-chart .gjob{fill:var(--busy)}
+.des-chart .gblk{fill:var(--blk)}
+.des-legend i.gap{background:var(--line);opacity:.6}
+.des-chart .seglb.sm{font-size:9px}

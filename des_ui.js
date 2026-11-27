@@ -169,31 +169,39 @@
         <text x="${(L + x(v) + 8).toFixed(1)}" y="${y + 20}" class="vlb">${v} 秒/組${i === 1 ? `　${note}` : ""}</text>`; }).join("")}
     </svg>${same ? '<p class="hint">改上面的「人數」或「作業時間」再按「跑模擬」，這裡就會出現「這次設定」跟現況比較。</p>' : ""}`;
   }
-  // 2. 各站的時間花在哪裡：每站一條，在加工／阻塞／閒置 三段加起來 100%
-  function splitChart(r) {
-    const W = chartW(), L = 64, R = 8, row = 30, H = r.stations.length * row + 4, w = W - L - R;
-    const seg = (x0, pct, cls, lab, y) => pct <= 0 ? "" : `<rect x="${(L + x0 / 100 * w).toFixed(1)}" y="${y}" width="${Math.max(0, pct / 100 * w - 2).toFixed(1)}" height="20" rx="3" style="fill:var(--${cls})"><title>${lab} ${pct}%</title></rect>` +
-      (pct >= 9 ? `<text x="${(L + (x0 + pct / 2) / 100 * w).toFixed(1)}" y="${y + 14}" class="seglb" text-anchor="middle">${pct.toFixed(0)}%</text>` : "");
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="各站在加工、阻塞、閒置的時間比例">
-      ${r.stations.map((s, i) => { const y = 2 + i * row; const u = s.util_pct, b = s.blocked_pct, d = Math.max(0, 100 - u - b);
-        return `<text x="${L - 8}" y="${y + 15}" class="lb2" text-anchor="end">${esc(s.station)}${s.station === r.bottleneck ? " ★" : ""}</text>` +
-          seg(0, u, "busy", "在加工", y) + seg(u, b, "blk", "阻塞（做完送不出去）", y) + seg(u + b, d, "idle", "閒置（等料）", y); }).join("")}
-    </svg>
-    <div class="des-legend"><span><i class="busy"></i>在加工</span><span><i class="blk"></i>阻塞（做完送不出去）</span><span><i class="idle"></i>閒置（等料）</span><span>★ 瓶頸站</span></div>`;
-  }
-  // 3. 哪一站前面最常堆半成品：各站前平均堆幾件，最多的標深色
-  function wipBars(r) {
-    const ws = r.stations.filter((s) => s.wip_avg !== undefined);
-    if (!ws.length) return '<p class="hint">這條線沒有站前在製品（只有一站）。</p>';
-    const top = Math.max(...ws.map((s) => s.wip_avg)), max = Math.max(top, 0.5);
-    const W = chartW(), L = 80, R = 80, row = 28, H = ws.length * row + 4;
-    const x = (v) => (v / max) * (W - L - R);
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="各站前平均堆幾件半成品">
-      ${ws.map((s, i) => { const y = 2 + i * row, hot = s.wip_avg === top && top > 0;
-        return `<text x="${L - 8}" y="${y + 15}" class="lb2" text-anchor="end">${esc(s.station)} 前</text>
-          <rect x="${L}" y="${y + 3}" width="${Math.max(2, x(s.wip_avg)).toFixed(1)}" height="18" rx="4" style="fill:${hot ? "var(--accent)" : "var(--line)"}"><title>${s.station} 前平均 ${s.wip_avg} 件，最多 ${s.wip_max} 件</title></rect>
-          <text x="${(L + x(s.wip_avg) + 8).toFixed(1)}" y="${y + 16}" class="vlb">${s.wip_avg} 件</text>`; }).join("")}
-    </svg>`;
+  // 2. 甘特圖（第 1 次模擬）：每一列是一站、橫軸是時間；藍色格子 = 在加工（數字 = 第幾件），橘色 = 做完送不出去，空白 = 等料
+  function ganttChart(g, bott, servers, reps) {
+    if (!g || !g.jobs.length) return "";
+    const W = chartW(), L = 72, R = 14, T = 6, B = 34, row = 36, n = g.stations.length, end = g.end || 1;
+    const H = T + n * row + B, x = (t) => L + (t / end) * (W - L - R);
+    const steps = [5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1800];
+    const step = steps.find((v) => end / v <= (W < 480 ? 5 : 8)) || 3600;
+    const tl = (t) => (end < 120 ? `${t}` : `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`);
+    const ticks = []; for (let t = 0; t <= end + 0.01; t += step) ticks.push(t);
+    const ay = T + n * row + 4;
+    // 先畫背景跑道和時間格線，再畫格子（格線才不會蓋住數字）
+    let svg = g.stations.map((st, i) => `<rect x="${L}" y="${T + i * row + 5}" width="${W - L - R}" height="${row - 10}" rx="4" class="gtrack"/>`).join("") +
+      ticks.map((t) => `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="${T}" y2="${ay}" class="grid"/><text x="${x(t).toFixed(1)}" y="${ay + 13}" class="lb" text-anchor="middle">${tl(t)}</text>`).join("");
+    g.stations.forEach((st, i) => {
+      const y = T + i * row;
+      svg += `<text x="${L - 8}" y="${y + row / 2 + 4}" class="lb2" text-anchor="end">${esc(st)}${st === bott ? " ★" : ""}</text>`;
+      // 好幾個人同時做：分成好幾條小跑道，避免格子疊在一起
+      const k = Math.max(1, servers[st] || 1), lane = (row - 10) / k, laneEnd = Array(k).fill(-1);
+      g.jobs.filter((j) => j[0] === st).sort((p, q) => p[1] - q[1]).forEach(([, a, b, num]) => {
+        let li = laneEnd.findIndex((e) => e <= a + 1e-6); if (li < 0) li = 0; laneEnd[li] = b;
+        const x0 = x(a), w = Math.max(1, x(b) - x(a) - 1.5), yy = y + 5 + li * lane;
+        svg += `<rect x="${x0.toFixed(1)}" y="${yy.toFixed(1)}" width="${w.toFixed(1)}" height="${(lane - 1).toFixed(1)}" rx="3" class="gjob"><title>${esc(st)} 第 ${num} 件：${a}～${b} 秒（${(b - a).toFixed(1)} 秒）</title></rect>` +
+          (w >= String(num).length * (lane >= 14 ? 6.4 : 5.2) + 3 && lane >= 10
+            ? `<text x="${(x0 + w / 2).toFixed(1)}" y="${(yy + lane / 2 + (lane >= 14 ? 3.5 : 3)).toFixed(1)}" class="${lane >= 14 ? "seglb" : "seglb sm"}" text-anchor="middle">${num}</text>` : "");
+      });
+      g.blocked.filter((bk) => bk[0] === st).forEach(([, a, b]) => {
+        svg += `<rect x="${x(a).toFixed(1)}" y="${(y + 5).toFixed(1)}" width="${Math.max(1, x(b) - x(a) - 1.5).toFixed(1)}" height="${row - 10}" rx="3" class="gblk"><title>${esc(st)} 做完送不出去（阻塞）：${a}～${b} 秒</title></rect>`;
+      });
+    });
+    svg += `<text x="${(L + W - R) / 2}" y="${H - 2}" class="lb" text-anchor="middle">時間（${end < 120 ? "秒" : "分:秒"}）</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="生產過程甘特圖：各站每一件的開始與結束時間">${svg}</svg>
+      <div class="des-legend"><span><i class="busy"></i>在加工（數字 = 第幾件）</span><span><i class="blk"></i>做完送不出去（阻塞）</span><span><i class="gap"></i>空白 = 等料（閒置）</span><span>★ 瓶頸站</span></div>
+      <p class="hint">這是 ${reps} 次模擬裡的第 1 次。每次抽到的加工時間不同，圖會有一點不一樣；上面的數字是 ${reps} 次的平均。</p>`;
   }
 
   let lastRes = null, resizeT = null;
@@ -201,8 +209,7 @@
     if (!lastRes) return;
     const [r, base] = lastRes;
     $("desCompare").innerHTML = compareChart(r, base);
-    $("desSplit").innerHTML = splitChart(r);
-    $("desWipBars").innerHTML = wipBars(r);
+    $("desGantt").innerHTML = ganttChart(r.gantt, r.bottleneck, r.params.servers || {}, r.completed_reps);
   }
   window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(drawSimple, 150); });   // 轉向、縮放視窗時重畫
 

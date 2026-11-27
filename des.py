@@ -299,6 +299,10 @@ class LineSim:
         self.st_max = {v: self.st_wip(v) for v in self.nodes if self.preds[v]}
         self.record = record                                # 只有第 1 次模擬記錄在製品隨時間的變化（畫圖用）
         self.timeline = {v: [(0.0, self.st_wip(v))] for v in self.nodes if self.preds[v]} if record else None
+        # 甘特圖（只有第 1 次模擬記錄）：每一件在每一站「開始、結束、第幾件」，以及阻塞（做完送不出去）的時段
+        self.gantt_jobs: list[tuple[str, float, float, int]] = []
+        self.gantt_blk: list[tuple[str, float, float]] = []
+        self.count = defaultdict(int)                       # 各站開工的第幾件
 
     def st_wip(self, v: str) -> int:
         """v 站前的在製品件數 = 每個前站送來、還沒被拿走的件數加總"""
@@ -358,6 +362,9 @@ class LineSim:
                     self.wait_n[s] += 1
                 self._note(s)
             d = self.sample(s)
+            self.count[s] += 1
+            if self.record:
+                self.gantt_jobs.append((s, self.t, self.t + d, self.count[s]))
             self.proc_time[s] += d
             self.busy[s] += 1
             self.seq += 1
@@ -367,7 +374,10 @@ class LineSim:
 
     def try_unblock(self, s: str) -> None:
         while self.blocked[s] and self._has_space(s):
-            self.block_time[s] += self.t - self.blocked[s].popleft()
+            t0 = self.blocked[s].popleft()
+            self.block_time[s] += self.t - t0
+            if self.record and self.t > t0:
+                self.gantt_blk.append((s, t0, self.t))
             self._push(s)
         self.try_start(s)
 
@@ -396,6 +406,8 @@ class LineSim:
         for s, q in self.blocked.items():
             for t0 in q:
                 self.block_time[s] += end - t0
+                if self.record and end > t0:
+                    self.gantt_blk.append((s, t0, end))
         stats = {}
         for s in self.nodes:
             cap_time = self.k[s] * end if end > 0 else 1.0
@@ -415,6 +427,9 @@ class LineSim:
             "buffers": {f"{a}→{b}": {"avg": (self.buf_area[(a, b)] / end) if end > 0 else 0,
                                      "max": self.buf_max[(a, b)]} for a, b in self.buf},
             "timeline": ({v: pts + [(end, pts[-1][1])] for v, pts in self.timeline.items()} if self.record else None),
+            "gantt": ({"end": end,
+                       "jobs": [(s, a, min(b, end), k) for s, a, b, k in self.gantt_jobs if a < end],   # 結束時還在做的件，畫到結束為止
+                       "blocked": list(self.gantt_blk)} if self.record else None),
         }
 
 
@@ -541,6 +556,11 @@ def simulate(model: dict, n_sets: int = 10, reps: int = 200, seed: int = 2026, m
                         for i, r in enumerate(runs) if r["finished"] >= n_sets],
         # 第 1 次模擬：各站前在製品隨時間的變化 [[時間, 件數], …]（畫階梯圖用）
         "wip_timeline": {v: _merge_same_time(pts) for v, pts in (runs[0]["timeline"] or {}).items()},
+        # 甘特圖（第 1 次模擬）：[工站, 開始秒, 結束秒, 第幾件]、阻塞 [工站, 開始秒, 結束秒]
+        "gantt": ({"stations": nodes, "end": round(runs[0]["gantt"]["end"], 1),
+                   "jobs": [[s, round(a, 1), round(b, 1), k] for s, a, b, k in runs[0]["gantt"]["jobs"]],
+                   "blocked": [[s, round(a, 1), round(b, 1)] for s, a, b in runs[0]["gantt"]["blocked"]]}
+                  if runs[0]["gantt"] else None),
         "actual": model["actual"], "flow_source": model["flow_source"],
         "data_source": model["source_label"], "min_samples": model["min_samples"],
         "samples": {st["station"]: st["pool"]["n"] for st in model["stations"]},
