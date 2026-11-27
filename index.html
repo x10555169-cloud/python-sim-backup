@@ -65,68 +65,89 @@
     </section>
 
     <section class="card" id="desCard" hidden>
-      <h2>經驗分布模擬 <span class="sub">（Empirical Distribution：各站加工時間直接用「已完成」紀錄的分布產生，讓電腦依流程假裝生產很多次，預測「如果……會怎樣」。實務上每站至少 30 筆、100 筆以上更理想。Python 程式：des.py）</span></h2>
+      <h2>經驗分布模擬 <span class="sub">改人數或作業時間，看產線會變多快</span></h2>
       <p class="hint" id="desTarget"></p>
-      <div class="des-params">
-        <label>加工時間資料來源
-          <select id="desSource">
-            <option value="round">只用本場已完成資料（即時）</option>
-            <option value="group">本場 + 本組流程相同的場次</option>
-            <option value="auto30">自動補到 30 筆（本組流程相同的場次，近的優先）</option>
-          </select></label>
-        <label>經驗分布
-          <select id="desMode">
-            <option value="cont">連續型（分段線性，建議）</option>
-            <option value="disc">離散型（重抽樣原始值）</option>
-            <option value="mean">固定平均值（沒有波動，比較用）</option>
-          </select></label>
-        <label>要生產幾組<input id="desN" type="number" min="1" max="200" value="10"></label>
-        <label>重複模擬次數<input id="desR" type="number" min="10" max="2000" value="200"></label>
-        <label>站前上限（一次設定全部）
-          <select id="desWip">
-            <option value="db">資料庫設定（沒設定用 2）</option>
-            <option value="1">全部 1</option><option value="2">全部 2</option>
-            <option value="3">全部 3</option><option value="5">全部 5</option>
-            <option value="none">不限制</option>
-          </select></label>
-        <label>亂數種子<input id="desSeed" type="number" value="2026"></label>
-      </div>
-      <p class="hint">資料量：🔴 少於 10 筆僅供參考　🟡 10～29 筆初步參考　🟢 30 筆以上達實務起點　⭐ 100 筆以上理想。每 5 秒自動讀取新完成的紀錄。<br>
-        只會加入<b>本組</b>、而且<b>流程跟本場完全相同</b>的場次；流程不同或沒有設定流程的場次不加入（同一個工站編號在不同流程裡做的事可能不一樣）。<br>
-        也可以改「作業時間倍率」（例如 ST08 改成 50% = 動作改善後快一倍）、「人數」，以及每一站的「站前在製品」（開始時前面已經放幾件半成品）和「站前上限」（最多能放幾件，滿了前站要停下來等），再按「跑模擬」比較結果。</p>
-      <div class="table-wrap"><table id="desStations"></table></div>
-      <p class="hint" id="desModelNote"></p>
-      <div class="row round-actions">
+      <div class="des-top">
+        <label>要生產幾組 <input id="desN" type="number" min="1" max="200" value="10"></label>
         <button id="desRun" class="primary" disabled>▶ 跑模擬</button>
         <button id="desReset">還原預設</button>
         <span class="hint" id="desMsg" role="status"></span>
       </div>
+      <div class="table-wrap"><table id="desStations"></table></div>
+      <p class="hint" id="desDataLine"></p>
+
+      <details class="des-adv" id="desAdvSet">
+        <summary>進階設定（老師用）</summary>
+        <div class="des-params">
+          <label>加工時間資料來源
+            <select id="desSource">
+              <option value="round">只用本場已完成資料（即時）</option>
+              <option value="group">本場 + 本組流程相同的場次</option>
+              <option value="auto30">自動補到 30 筆（本組流程相同的場次，近的優先）</option>
+            </select></label>
+          <label>經驗分布
+            <select id="desMode">
+              <option value="cont">連續型（分段線性，建議）</option>
+              <option value="disc">離散型（重抽樣原始值）</option>
+              <option value="mean">固定平均值（沒有波動，比較用）</option>
+            </select></label>
+          <label>重複模擬次數<input id="desR" type="number" min="10" max="2000" value="200"></label>
+          <label>站前上限（一次設定全部）
+            <select id="desWip">
+              <option value="db">資料庫設定（沒設定用 2）</option>
+              <option value="1">全部 1</option><option value="2">全部 2</option>
+              <option value="3">全部 3</option><option value="5">全部 5</option>
+              <option value="none">不限制</option>
+            </select></label>
+          <label>亂數種子<input id="desSeed" type="number" value="2026"></label>
+        </div>
+        <p class="hint">資料量：🔴 少於 10 筆僅供參考　🟡 10～29 筆初步參考　🟢 30 筆以上達實務起點　⭐ 100 筆以上理想。每 5 秒自動讀取新完成的紀錄。
+          只會加入本組、而且流程跟本場完全相同的場次。</p>
+        <div class="table-wrap"><table id="desAdvStations"></table></div>
+        <p class="hint" id="desModelNote"></p>
+      </details>
+
       <div id="desResult" hidden>
         <dl class="stats" id="desStats"></dl>
-        <h3 class="des-h3">每一次模擬的結果 <span class="sub">（每次抽到的加工時間不同，結果也不同；跑越多次，平均越穩定）</span></h3>
-        <div class="des-chart" id="desRepChart"></div>
-        <p class="hint" id="desRepNote"></p>
-        <h3 class="des-h3">各站模擬結果 <span class="sub">（利用率 + 阻塞 + 閒置 = 100%）</span></h3>
-        <div class="table-wrap"><table id="desStTable"></table></div>
-        <h3 class="des-h3">各站站前在製品 <span class="sub">（200 次模擬的平均；合流站 = 各前站送來的件數加總）</span></h3>
-        <div class="table-wrap"><table id="desWipTable"></table></div>
-        <h3 class="des-h3">各站前在製品隨時間的變化 <span class="sub">（第 1 次模擬；縱軸刻度相同）</span></h3>
-        <div class="des-wipgrid" id="desWipChart"></div>
-        <h3 class="des-h3">站間緩衝區（每一條連線）</h3>
-        <div class="table-wrap"><table id="desBufTable"></table></div>
-        <p class="hint" id="desNote"></p>
-      </div>
-      <div id="desHistBox" hidden>
-        <h3 class="des-h3">模擬紀錄 <span class="sub">（每按一次「跑模擬」存一筆，最多 50 筆；存在這台電腦的瀏覽器裡，重新整理也還在）</span></h3>
-        <div class="row round-actions">
-          <button id="desHistCsv">下載紀錄（CSV）</button>
-          <button id="desHistRepCsv">下載勾選紀錄的每一次結果（CSV）</button>
-          <button id="desHistDel">刪除勾選</button>
-          <button id="desHistClear">全部清除</button>
+        <h3 class="des-h3">現況 vs 這次設定 <span class="sub">產線 Cycle Time（越短越快）</span></h3>
+        <div class="des-chart" id="desCompare"></div>
+        <h3 class="des-h3">各站的時間花在哪裡</h3>
+        <div class="des-chart" id="desSplit"></div>
+        <h3 class="des-h3">哪一站前面最常堆半成品 <span class="sub">平均堆幾件</span></h3>
+        <div class="des-chart" id="desWipBars"></div>
+        <div id="desRecentBox" hidden>
+          <h3 class="des-h3">最近的模擬紀錄</h3>
+          <div class="table-wrap"><table id="desRecent"></table></div>
         </div>
-        <div class="table-wrap"><table id="desHistTable"></table></div>
-        <h3 class="des-h3">比較勾選的紀錄 <span class="sub">（圓點 = 產線 Cycle Time 平均；橫線 = 90% 範圍）</span></h3>
-        <div class="des-chart" id="desCmpChart"></div>
+
+        <details class="des-adv" id="desAdvRes">
+          <summary>進階結果（老師用）</summary>
+          <dl class="stats" id="desAdvStats"></dl>
+          <h3 class="des-h3">每一次模擬的結果 <span class="sub">（每次抽到的加工時間不同，結果也不同；跑越多次，平均越穩定）</span></h3>
+          <div class="des-chart" id="desRepChart"></div>
+          <p class="hint" id="desRepNote"></p>
+          <h3 class="des-h3">各站模擬結果 <span class="sub">（利用率 + 阻塞 + 閒置 = 100%）</span></h3>
+          <div class="table-wrap"><table id="desStTable"></table></div>
+          <h3 class="des-h3">各站站前在製品 <span class="sub">（200 次模擬的平均；合流站 = 各前站送來的件數加總）</span></h3>
+          <div class="table-wrap"><table id="desWipTable"></table></div>
+          <h3 class="des-h3">各站前在製品隨時間的變化 <span class="sub">（第 1 次模擬；縱軸刻度相同）</span></h3>
+          <div class="des-wipgrid" id="desWipChart"></div>
+          <h3 class="des-h3">站間緩衝區（每一條連線）</h3>
+          <div class="table-wrap"><table id="desBufTable"></table></div>
+          <p class="hint" id="desNote"></p>
+          <div id="desHistBox" hidden>
+            <h3 class="des-h3">全部模擬紀錄 <span class="sub">（每按一次「跑模擬」存一筆，最多 50 筆；存在這台電腦的瀏覽器裡）</span></h3>
+            <div class="row round-actions">
+              <button id="desHistCsv">下載紀錄（CSV）</button>
+              <button id="desHistRepCsv">下載勾選紀錄的每一次結果（CSV）</button>
+              <button id="desHistDel">刪除勾選</button>
+              <button id="desHistClear">全部清除</button>
+            </div>
+            <div class="table-wrap"><table id="desHistTable"></table></div>
+            <h3 class="des-h3">比較勾選的紀錄 <span class="sub">產線 Cycle Time 平均</span></h3>
+            <div class="des-chart" id="desCmpChart"></div>
+          </div>
+        </details>
       </div>
     </section>
 

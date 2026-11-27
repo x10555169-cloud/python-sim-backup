@@ -53,24 +53,43 @@
     return s.wip_limit_in ?? "";
   }
 
+  // 快慢範圍：最快 ─●─ 最慢（● = 平均），所有工站用同一把尺，方便互相比較
+  function rangeSvg(p, lo, hi) {
+    if (p.min == null) return '<span class="muted">—</span>';
+    const W = 200, H = 18, x = (v) => 6 + (hi > lo ? (v - lo) / (hi - lo) : 0.5) * (W - 12);
+    return `<svg class="des-range" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="最快 ${p.min} 秒、平均 ${p.mean} 秒、最慢 ${p.max} 秒">
+      <line x1="${x(p.min).toFixed(1)}" x2="${Math.max(x(p.max), x(p.min) + 1).toFixed(1)}" y1="9" y2="9" class="rangeln"/>
+      <circle cx="${x(p.mean).toFixed(1)}" cy="9" r="5" class="rangedot"><title>平均 ${p.mean} 秒</title></circle></svg>
+      <small class="muted">${p.min}～${p.max} 秒</small>`;
+  }
+
   function renderParams(keep = {}) {
     const m = model, mode = $("desMode").value;
-    $("desStations").innerHTML = `<thead><tr><th>工站</th><th>前站（齊套）</th><th>資料筆數（本場 + 加入）</th>
-      <th>經驗分布（累積分布）</th><th>作業時間倍率</th><th>人數</th><th>站前在製品<br><small>開始時（件／套）</small></th><th>站前上限<br><small>空白 = 不限</small></th></tr></thead><tbody>` +
+    const lo = Math.min(...m.stations.filter((s) => s.pool.min != null).map((s) => s.pool.min));
+    const hi = Math.max(...m.stations.filter((s) => s.pool.max != null).map((s) => s.pool.max));
+    // 主表：學生只需要看平均、快慢範圍，改人數和作業時間
+    $("desStations").innerHTML = `<thead><tr><th>工站</th><th>平均 CT</th><th>快慢範圍（最快 ─●─ 最慢）</th><th>人數</th><th>作業時間</th></tr></thead><tbody>` +
+      m.stations.map((s) => `<tr><td><b>${esc(s.station)}</b>${s.station === m.terminal ? ' <span class="tag">終點</span>' : ""}</td>
+        <td>${s.pool.mean ?? "—"} 秒</td><td>${rangeSvg(s.pool, lo, hi)}</td>
+        <td><input class="des-in" type="number" min="1" max="5" step="1" value="${keep["k:" + s.station] ?? 1}" data-k="${esc(s.station)}" aria-label="${esc(s.station)} 人數"></td>
+        <td><input class="des-in" type="number" min="10" max="500" step="10" value="${keep["f:" + s.station] ?? 100}" data-f="${esc(s.station)}" aria-label="${esc(s.station)} 作業時間倍率"> %</td></tr>`).join("") + "</tbody>";
+    // 進階：資料筆數與來源、經驗分布圖、站前在製品、站前上限
+    $("desAdvStations").innerHTML = `<thead><tr><th>工站</th><th>前站（齊套）</th><th>資料筆數（本場 + 加入）</th>
+      <th>經驗分布（累積分布）</th><th>站前在製品<br><small>開始時（件／套）</small></th><th>站前上限<br><small>空白 = 不限</small></th></tr></thead><tbody>` +
       m.stations.map((s) => {
         const o = s.own, a = s.added, p = s.pool;
         const addTxt = a.n ? ` + 加入 ${a.n}<br><small>${esc(s.used.slice(1).join("、"))}：平均 ${a.mean}（本場 ${o.mean ?? "—"}）</small>${s.diff_warn ? ` <span class="tag warn" title="加入的資料平均跟本場差 ${s.diff_pct}%，請確認做法相同再合併">差 ${s.diff_pct}%</span>` : ""}` : "";
-        return `<tr${s.station === m.terminal ? ' class="des-term"' : ""}>
-        <td><b>${esc(s.station)}</b>${s.station === m.terminal ? ' <span class="tag">終點</span>' : ""}${s.no_data ? ' <span class="tag warn">無資料</span>' : ""}</td>
+        return `<tr>
+        <td><b>${esc(s.station)}</b>${s.no_data ? ' <span class="tag warn">無資料</span>' : ""}</td>
         <td>${s.preds.length ? esc(s.preds.join(" + ")) : '<span class="muted">起點</span>'}</td>
         <td><b>${p.n}</b> <span class="des-lv des-lv-${s.level.code}">${LEVEL_ICON[s.level.code]} ${esc(s.level.label)}</span><br><small>本場 ${o.n}${addTxt}</small></td>
         <td>${cdfSvg(s.cdf, mode)}<br><small>${p.min ?? "—"}～${p.max ?? "—"} 秒｜平均 ${p.mean ?? "—"}｜中位數 ${p.median ?? "—"}</small></td>
-        <td><input class="des-in" type="number" min="10" max="500" step="10" value="${keep["f:" + s.station] ?? 100}" data-f="${esc(s.station)}" aria-label="${esc(s.station)} 作業時間倍率"> %</td>
-        <td><input class="des-in" type="number" min="1" max="5" step="1" value="${keep["k:" + s.station] ?? 1}" data-k="${esc(s.station)}" aria-label="${esc(s.station)} 人數"></td>
         ${s.preds.length ? `<td><input class="des-in" type="number" min="0" max="50" step="1" value="${keep["i:" + s.station] ?? s.init_wip_in ?? 0}" data-i="${esc(s.station)}" aria-label="${esc(s.station)} 開始時站前在製品"></td>
         <td><input class="des-in" type="number" min="1" max="50" step="1" value="${keep["c:" + s.station] ?? capDefault(s)}" data-c="${esc(s.station)}" placeholder="不限" aria-label="${esc(s.station)} 站前上限"></td>`
         : '<td colspan="2"><span class="muted">起點：原料無限，沒有站前在製品</span></td>'}</tr>`;
       }).join("") + "</tbody>";
+    // 主畫面只留一行重點
+    $("desDataLine").textContent = `資料：每站 ${m.min_samples} 筆以上${m.min_samples < 30 ? "（未達 30 筆，結果僅供參考）" : ""}｜流程：${m.flow_source.replace(/^沒有設定流程 → /, "沒有設定，")}`;
     const minN = m.min_samples;
     const notes = [`資料來源：${m.source_label}（只用已完成的紀錄）`, `資料最少的工站 ${minN} 筆${minN < 30 ? "，未達實務起點 30 筆，結果僅供參考；可在「資料來源」加入之前的資料" : ""}`,
       `流程：${m.flow_source}`, `站前上限：${m.wip_limit_source}`, `開始時站前在製品：${m.init_wip_source}`];
@@ -128,18 +147,87 @@
       seed: Math.round(Number($("desSeed").value) || 2026), mode: $("desMode").value, wip, init, factor, servers };
   }
 
-  function renderResult(r) {
+  // ---------- 簡化版的三張圖 ----------
+  // 圖的寬度跟著畫面寬度（手機上字才不會縮得太小）
+  const chartW = () => Math.max(300, Math.min(640, $("desResult").clientWidth || 640));
+  // 1. 現況 vs 這次設定：兩根橫條（產線 CT，越短越快）
+  function compareChart(r, base) {
+    const same = !base || base === r;
+    const rows = same ? [["現況", r.line_ct_sec.mean, "var(--muted)"]]
+      : [["現況", base.line_ct_sec.mean, "var(--muted)"], ["這次設定", r.line_ct_sec.mean, "var(--accent)"]];
+    const max = Math.max(...rows.map((x) => x[1]));
+    const W = chartW(), L = 80, R = W < 480 ? 120 : 150, row = 36, H = rows.length * row + 6;
+    const x = (v) => (v / max) * (W - L - R);
+    let note = "";
+    if (!same) {
+      const d = (base.line_ct_sec.mean - r.line_ct_sec.mean) / base.line_ct_sec.mean * 100;
+      note = d >= 0.5 ? `快了 ${d.toFixed(0)}%` : d <= -0.5 ? `慢了 ${(-d).toFixed(0)}%` : "差不多";
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="現況與這次設定的產線 Cycle Time 比較">
+      ${rows.map(([lab, v, c], i) => { const y = 4 + i * row; return `<text x="${L - 10}" y="${y + 20}" class="lb2" text-anchor="end">${lab}</text>
+        <rect x="${L}" y="${y + 4}" width="${Math.max(2, x(v)).toFixed(1)}" height="22" rx="4" fill="${c}"><title>${lab}：${v} 秒/組</title></rect>
+        <text x="${(L + x(v) + 8).toFixed(1)}" y="${y + 20}" class="vlb">${v} 秒/組${i === 1 ? `　${note}` : ""}</text>`; }).join("")}
+    </svg>${same ? '<p class="hint">改上面的「人數」或「作業時間」再按「跑模擬」，這裡就會出現「這次設定」跟現況比較。</p>' : ""}`;
+  }
+  // 2. 各站的時間花在哪裡：每站一條，在加工／阻塞／閒置 三段加起來 100%
+  function splitChart(r) {
+    const W = chartW(), L = 64, R = 8, row = 30, H = r.stations.length * row + 4, w = W - L - R;
+    const seg = (x0, pct, cls, lab, y) => pct <= 0 ? "" : `<rect x="${(L + x0 / 100 * w).toFixed(1)}" y="${y}" width="${Math.max(0, pct / 100 * w - 2).toFixed(1)}" height="20" rx="3" style="fill:var(--${cls})"><title>${lab} ${pct}%</title></rect>` +
+      (pct >= 9 ? `<text x="${(L + (x0 + pct / 2) / 100 * w).toFixed(1)}" y="${y + 14}" class="seglb" text-anchor="middle">${pct.toFixed(0)}%</text>` : "");
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="各站在加工、阻塞、閒置的時間比例">
+      ${r.stations.map((s, i) => { const y = 2 + i * row; const u = s.util_pct, b = s.blocked_pct, d = Math.max(0, 100 - u - b);
+        return `<text x="${L - 8}" y="${y + 15}" class="lb2" text-anchor="end">${esc(s.station)}${s.station === r.bottleneck ? " ★" : ""}</text>` +
+          seg(0, u, "busy", "在加工", y) + seg(u, b, "blk", "阻塞（做完送不出去）", y) + seg(u + b, d, "idle", "閒置（等料）", y); }).join("")}
+    </svg>
+    <div class="des-legend"><span><i class="busy"></i>在加工</span><span><i class="blk"></i>阻塞（做完送不出去）</span><span><i class="idle"></i>閒置（等料）</span><span>★ 瓶頸站</span></div>`;
+  }
+  // 3. 哪一站前面最常堆半成品：各站前平均堆幾件，最多的標深色
+  function wipBars(r) {
+    const ws = r.stations.filter((s) => s.wip_avg !== undefined);
+    if (!ws.length) return '<p class="hint">這條線沒有站前在製品（只有一站）。</p>';
+    const top = Math.max(...ws.map((s) => s.wip_avg)), max = Math.max(top, 0.5);
+    const W = chartW(), L = 80, R = 80, row = 28, H = ws.length * row + 4;
+    const x = (v) => (v / max) * (W - L - R);
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="各站前平均堆幾件半成品">
+      ${ws.map((s, i) => { const y = 2 + i * row, hot = s.wip_avg === top && top > 0;
+        return `<text x="${L - 8}" y="${y + 15}" class="lb2" text-anchor="end">${esc(s.station)} 前</text>
+          <rect x="${L}" y="${y + 3}" width="${Math.max(2, x(s.wip_avg)).toFixed(1)}" height="18" rx="4" style="fill:${hot ? "var(--accent)" : "var(--line)"}"><title>${s.station} 前平均 ${s.wip_avg} 件，最多 ${s.wip_max} 件</title></rect>
+          <text x="${(L + x(s.wip_avg) + 8).toFixed(1)}" y="${y + 16}" class="vlb">${s.wip_avg} 件</text>`; }).join("")}
+    </svg>`;
+  }
+
+  let lastRes = null, resizeT = null;
+  function drawSimple() {
+    if (!lastRes) return;
+    const [r, base] = lastRes;
+    $("desCompare").innerHTML = compareChart(r, base);
+    $("desSplit").innerHTML = splitChart(r);
+    $("desWipBars").innerHTML = wipBars(r);
+  }
+  window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(drawSimple, 150); });   // 轉向、縮放視窗時重畫
+
+  function renderResult(r, base) {
     const a = model.actual, p = r.params;
     const range = (x, sec = false) => `<small>90% 落在 ${sec ? x.p5 : fmtSec(x.p5)}～${sec ? x.p95 + " 秒" : fmtSec(x.p95)}</small>`;
     const sameN = p.n_sets === a.output_sets && a.total_sec > 0;
+    $("desResult").hidden = false;                 // 先顯示，圖才量得到寬度
+    // 主畫面：4 張卡片
     $("desStats").innerHTML = [
-      [`完成 ${p.n_sets} 組要多久（預測）`, `${fmtSec(r.makespan_sec.mean)}<br>${range(r.makespan_sec)}`],
-      ["產線 Cycle Time（預測）", `${r.line_ct_sec.mean} 秒/組<br>${range(r.line_ct_sec, true)}`],
-      ["每小時產出（預測）", `${r.throughput_per_hr} 組`],
-      ["瓶頸站（利用率最高）", `${esc(r.bottleneck)}<br><small>${r.bottleneck_share_pct}% 的模擬中是它</small>`],
-      ["理論最快 Cycle Time", `${r.bound_ct_sec} 秒/組<br><small>受限於 ${esc(r.bound_station)}（平均加工時間 ÷ 人數）</small>`],
-      ...(sameN ? [["實際（同樣做 " + a.output_sets + " 組）", `${fmtSec(a.total_sec)}<br><small>產線 Cycle Time ${a.takt_sec} 秒/組</small>`]] : []),
+      [`完成 ${p.n_sets} 組要多久（預測）`, fmtSec(r.makespan_sec.mean)],
+      ["產線 Cycle Time（預測）", `${r.line_ct_sec.mean} 秒/組`],
+      ["瓶頸站", esc(r.bottleneck)],
+      [`實際（本場完成 ${a.output_sets} 組）`, `${fmtSec(a.total_sec)}<br><small>產線 Cycle Time ${a.takt_sec ?? "—"} 秒/組</small>`],
     ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+    // 進階：範圍、每小時產出、理論最快
+    $("desAdvStats").innerHTML = [
+      [`完成 ${p.n_sets} 組要多久`, range(r.makespan_sec)],
+      ["產線 Cycle Time", range(r.line_ct_sec, true)],
+      ["每小時產出（預測）", `${r.throughput_per_hr} 組`],
+      ["瓶頸站", `${esc(r.bottleneck)}<br><small>${r.bottleneck_share_pct}% 的模擬中是它</small>`],
+      ["理論最快 Cycle Time", `${r.bound_ct_sec} 秒/組<br><small>受限於 ${esc(r.bound_station)}（平均加工時間 ÷ 人數）</small>`],
+    ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+    lastRes = [r, base];
+    drawSimple();
 
     $("desStTable").innerHTML = `<thead><tr><th>工站</th><th>資料筆數</th><th>有效加工時間</th><th>利用率（在加工）</th><th>阻塞（做完送不出去）</th><th>閒置（等料）</th><th>當瓶頸的比例</th></tr></thead><tbody>` +
       r.stations.map((s) => `<tr${s.station === r.bottleneck ? ' class="des-bn"' : ""}><td>${esc(s.station)}${s.factor !== 1 ? ` <span class="tag">×${Math.round(s.factor * 100)}%</span>` : ""}${s.servers > 1 ? ` <span class="tag">${s.servers} 人</span>` : ""}</td>
@@ -259,7 +347,7 @@
     });
     return out.length ? out.join("、") : "現況（預設設定）";
   }
-  function saveRecord(r, t) {
+  function saveRecord(r, t, base) {
     const p = params();
     const modeTxt = { cont: "連續型", disc: "離散型", mean: "固定平均" }[r.params.mode];
     const rec = {
@@ -269,6 +357,7 @@
       makespan: r.makespan_sec, ct: r.line_ct_sec, tp: r.throughput_per_hr, bott: r.bottleneck, bshare: r.bottleneck_share_pct,
       actual: { n: model.actual.output_sets, total: model.actual.total_sec, ct: model.actual.takt_sec },
       cts: r.reps_detail.map((d) => d.ct), seeds: [r.reps_detail[0]?.seed ?? r.params.seed],
+      baseCt: base ? base.line_ct_sec.mean : null,
     };
     records.push(rec);
     while (records.length > REC_MAX) records.shift();
@@ -277,9 +366,19 @@
     renderRecords();
   }
   const fmtAt = (iso) => new Date(iso).toLocaleString("zh-TW", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const fasterText = (r) => {
+    if (r.baseCt == null || r.settings === "現況（預設設定）") return '<span class="muted">（現況）</span>';
+    const d = (r.baseCt - r.ct.mean) / r.baseCt * 100;
+    return d >= 0.5 ? `<b>快了 ${d.toFixed(0)}%</b>` : d <= -0.5 ? `慢了 ${(-d).toFixed(0)}%` : "差不多";
+  };
   function renderRecords() {
     $("desHistBox").hidden = !records.length;
+    $("desRecentBox").hidden = !records.length;
     if (!records.length) return;
+    // 主畫面：最近 5 筆
+    $("desRecent").innerHTML = `<thead><tr><th>時間</th><th>組別場次</th><th>改了什麼</th><th>產線 Cycle Time</th><th>瓶頸</th><th>比現況</th></tr></thead><tbody>` +
+      records.slice(-5).reverse().map((r) => `<tr><td>${fmtAt(r.at)}</td><td>${esc(r.line)}</td><td class="des-set">${esc(r.settings)}</td>
+        <td>${r.ct.mean} 秒/組</td><td>${esc(r.bott)}</td><td>${fasterText(r)}</td></tr>`).join("") + "</tbody>";
     $("desHistTable").innerHTML = `<thead><tr><th></th><th>#</th><th>時間</th><th>組別場次</th><th>設定</th><th>資料、分布</th><th>做幾組</th><th>模擬次數</th>
       <th>完成時間（90% 範圍）</th><th>產線 CT（90% 範圍）</th><th>每小時</th><th>瓶頸</th></tr></thead><tbody>` +
       records.slice().reverse().map((r) => `<tr><td><input type="checkbox" data-rec="${r.id}" ${checked.has(r.id) ? "checked" : ""} aria-label="比較紀錄 ${r.id}"></td>
@@ -289,21 +388,17 @@
         <td><b>${r.ct.mean}</b> 秒/組<br><small>${r.ct.p5}～${r.ct.p95}</small></td><td>${r.tp} 組</td><td>${esc(r.bott)}<br><small>${r.bshare}%</small></td></tr>`).join("") + "</tbody>";
     $("desCmpChart").innerHTML = cmpChart(records.filter((r) => checked.has(r.id)));
   }
-  // 比較勾選的紀錄：點 = 產線 CT 平均，橫線 = 90% 範圍；同一個橫軸
+  // 比較勾選的紀錄：一般橫條圖，每筆一根（產線 CT 平均）
   function cmpChart(rs) {
     if (!rs.length) return '<p class="hint">勾選上表的紀錄，就會畫在這裡比較。</p>';
-    const lo0 = Math.min(...rs.map((r) => r.ct.p5)), hi0 = Math.max(...rs.map((r) => r.ct.p95));
-    const pad = (hi0 - lo0 || 1) * 0.1, lo = Math.max(0, lo0 - pad), hi = hi0 + pad;
-    const W = 640, row = 30, L = 210, Rm = 16, T = 8, H = T + rs.length * row + 30;
-    const x = (v) => L + (v - lo) / (hi - lo) * (W - L - Rm);
-    const ticks = [0, 1, 2, 3, 4].map((k) => lo + (hi - lo) * k / 4);
+    const max = Math.max(...rs.map((r) => r.ct.mean));
+    const W = 640, L = 230, R = 90, row = 30, H = rs.length * row + 4;
+    const x = (v) => (v / max) * (W - L - R);
     const lab = (r) => { const s = `#${r.id} ${r.line}｜${r.settings}`; return s.length > 26 ? s.slice(0, 25) + "…" : s; };
     return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="比較 ${rs.length} 筆模擬紀錄的產線 Cycle Time">
-      ${ticks.map((v) => `<line x1="${x(v).toFixed(1)}" x2="${x(v).toFixed(1)}" y1="${T}" y2="${H - 26}" class="grid"/><text x="${x(v).toFixed(1)}" y="${H - 12}" class="lb" text-anchor="middle">${v.toFixed(1)}</text>`).join("")}
-      <text x="${(L + W - Rm) / 2}" y="${H - 1}" class="lb" text-anchor="middle">產線 Cycle Time（秒/組）</text>
-      ${rs.map((r, i) => { const cy = T + i * row + row / 2; return `<text x="${L - 8}" y="${cy + 4}" class="lb2" text-anchor="end"><title>#${r.id} ${esc(r.line)}｜${esc(r.settings)}</title>${esc(lab(r))}</text>
-        <line x1="${x(r.ct.p5).toFixed(1)}" x2="${x(r.ct.p95).toFixed(1)}" y1="${cy}" y2="${cy}" class="rng"/>
-        <circle cx="${x(r.ct.mean).toFixed(1)}" cy="${cy}" r="5" class="mean"/><text x="${(x(r.ct.mean) + 8).toFixed(1)}" y="${cy - 7}" class="lb">${r.ct.mean}</text>`; }).join("")}
+      ${rs.map((r, i) => { const y = 2 + i * row; return `<text x="${L - 8}" y="${y + 16}" class="lb2" text-anchor="end"><title>#${r.id} ${esc(r.line)}｜${esc(r.settings)}</title>${esc(lab(r))}</text>
+        <rect x="${L}" y="${y + 4}" width="${Math.max(2, x(r.ct.mean)).toFixed(1)}" height="20" rx="4" style="fill:var(--accent)"></rect>
+        <text x="${(L + x(r.ct.mean) + 8).toFixed(1)}" y="${y + 18}" class="vlb">${r.ct.mean} 秒/組</text>`; }).join("")}
     </svg>`;
   }
   function csvDownload(name, rows) {
@@ -347,10 +442,17 @@
     $("desMsg").textContent = "模擬中…（第一次要先下載 Python）";
     const t0 = performance.now();
     try {
-      const r = await BrowserEngine.simulate(t.g, t.r, t.src, params());
+      const p = params();
+      const r = await BrowserEngine.simulate(t.g, t.r, t.src, p);
       if (!r.ok) { $("desMsg").textContent = r.error; return; }
-      renderResult(r);
-      saveRecord(r, t);
+      // 有改設定時，用同樣的組數、次數、亂數種子再跑一次「現況」（不改任何設定）當比較基準
+      let base = r;
+      if (settingsText(p) !== "現況（預設設定）") {
+        base = await BrowserEngine.simulate(t.g, t.r, t.src, { n_sets: p.n_sets, reps: p.reps, seed: p.seed, mode: p.mode, wip: "db", factor: {}, servers: {} });
+        if (!base.ok) base = r;
+      }
+      renderResult(r, base);
+      saveRecord(r, t, base);
       $("desMsg").textContent = `完成：${r.completed_reps} 次模擬，用了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`;
     } catch (e) {
       $("desMsg").textContent = `模擬失敗：${e.message}`;
