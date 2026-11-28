@@ -70,6 +70,7 @@
       <div class="des-top">
         <label>要生產幾組 <input id="desN" type="number" min="1" max="200" value="10"></label>
         <label>模擬幾次 <input id="desR" type="number" min="10" max="2000" step="10" value="200"></label>
+        <label title="整條產線同時最多幾件在做；到上限時起點站先停，等終點做完一件才再投入。空白 = 不限">產線 WIP 上限 <input id="desLineWip" type="number" min="1" max="99" step="1" placeholder="不限"></label>
         <button id="desRun" class="primary" disabled>▶ 跑模擬</button>
         <button id="desReset">還原預設</button>
         <span class="hint" id="desMsg" role="status"></span>
@@ -113,7 +114,7 @@
           <h3 class="des-h3">現況 vs 這次設定 <span class="sub">產線 Cycle Time（越短越快）</span></h3>
           <div class="des-chart" id="desCompare"></div>
         </div>
-        <h3 class="des-h3">生產過程（甘特圖） <span class="sub">每一列是一站，每一格是一件，格子裡的數字是第幾件</span></h3>
+        <h3 class="des-h3">生產過程（甘特圖） <span class="sub">每一列是一站，每一格是一件，格子裡的數字是第幾件；最上面是整條產線同時有幾件（WIP）</span></h3>
         <div class="des-chart" id="desGantt"></div>
         <div id="desRecentBox" hidden>
           <h3 class="des-h3">最近的模擬紀錄</h3>

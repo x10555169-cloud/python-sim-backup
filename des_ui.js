@@ -145,7 +145,8 @@
     card.querySelectorAll("input[data-c]").forEach((el) => { const v = Math.round(Number(el.value)); wip[el.dataset.c] = el.value.trim() !== "" && v > 0 ? v : null; });
     card.querySelectorAll("input[data-i]").forEach((el) => { init[el.dataset.i] = Math.max(0, Math.round(Number(el.value) || 0)); });
     return { n_sets: Math.max(1, Math.round(Number($("desN").value) || 10)), reps: Math.max(10, Math.min(2000, Math.round(Number($("desR").value) || 200))),
-      seed: Math.round(Number($("desSeed").value) || 2026), mode: $("desMode").value, wip, init, factor, servers };
+      seed: Math.round(Number($("desSeed").value) || 2026), mode: $("desMode").value, wip, init, factor, servers,
+      line_wip: Math.round(Number($("desLineWip").value)) > 0 ? Math.round(Number($("desLineWip").value)) : null };
   }
 
   // ---------- 簡化版的三張圖 ----------
@@ -171,20 +172,41 @@
     </svg>${same ? '<p class="hint">改上面的「人數」或「作業時間」再按「跑模擬」，這裡就會出現「這次設定」跟現況比較。</p>' : ""}`;
   }
   // 2. 甘特圖（第 1 次模擬）：每一列是一站、橫軸是時間；藍色格子 = 在加工（數字 = 第幾件），橘色 = 做完送不出去，空白 = 等料
-  function ganttChart(g, bott, servers, reps) {
+  //    最上面一條 = 整條產線的在製品（WIP，數字 = 線上同時有幾件，顏色越深越多）
+  function ganttChart(r) {
+    const g = r.gantt, bott = r.bottleneck, servers = r.params.servers || {}, reps = r.completed_reps;
     if (!g || !g.jobs.length) return "";
-    const W = chartW(), L = 72, R = 14, T = 6, B = 34, row = 36, n = g.stations.length, end = g.end || 1;
-    const H = T + n * row + B, x = (t) => L + (t / end) * (W - L - R);
+    const line = r.line_wip || null;
+    const W = chartW(), L = 78, R = 14, T = 6, B = 34, row = 36, end = g.end || 1;
+    const lineH = line && line.timeline && line.timeline.length ? 30 : 0;
+    const tops = g.stations.map((st, i) => T + lineH + i * row);
+    const ay = T + lineH + g.stations.length * row + 4, H = ay + B, x = (t) => L + (Math.min(t, end) / end) * (W - L - R);
     const steps = [5, 10, 15, 20, 30, 60, 120, 300, 600, 900, 1800];
     const step = steps.find((v) => end / v <= (W < 480 ? 5 : 8)) || 3600;
-    const tl = (t) => (end < 120 ? `${t}` : `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`);
+    const tlab = (t) => (end < 120 ? `${t}` : `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`);
     const ticks = []; for (let t = 0; t <= end + 0.01; t += step) ticks.push(t);
-    const ay = T + n * row + 4;
+    // 產線 WIP 細條：件數一樣的時段畫成一格，0 件不畫
+    const wipStrip = (pts, y, h, who) => {
+      let out = "";
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [a, w] = pts[i], b = pts[i + 1][0];
+        if (w <= 0 || b <= a) continue;
+        const x0 = x(a), wd = Math.max(1, x(b) - x(a) - 1);
+        out += `<rect x="${x0.toFixed(1)}" y="${y.toFixed(1)}" width="${wd.toFixed(1)}" height="${h}" rx="2" class="gwip" fill-opacity="${Math.min(0.6, 0.18 + 0.1 * w).toFixed(2)}"><title>${who}：${a}～${b} 秒有 ${w} 件</title></rect>`;
+        if (wd >= String(w).length * 6 + 3) out += `<text x="${(x0 + wd / 2).toFixed(1)}" y="${(y + h / 2 + 3.5).toFixed(1)}" class="wlb" text-anchor="middle">${w}</text>`;
+      }
+      return out;
+    };
     // 先畫背景跑道和時間格線，再畫格子（格線才不會蓋住數字）
-    let svg = g.stations.map((st, i) => `<rect x="${L}" y="${T + i * row + 5}" width="${W - L - R}" height="${row - 10}" rx="4" class="gtrack"/>`).join("") +
-      ticks.map((t) => `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="${T}" y2="${ay}" class="grid"/><text x="${x(t).toFixed(1)}" y="${ay + 13}" class="lb" text-anchor="middle">${tl(t)}</text>`).join("");
+    let svg = g.stations.map((st, i) => `<rect x="${L}" y="${tops[i] + 5}" width="${W - L - R}" height="${row - 10}" rx="4" class="gtrack"/>`).join("") +
+      ticks.map((t) => `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="${T}" y2="${ay}" class="grid"/><text x="${x(t).toFixed(1)}" y="${ay + 13}" class="lb" text-anchor="middle">${tlab(t)}</text>`).join("");
+    if (lineH) {   // 最上面：整條產線的在製品
+      svg += `<text x="${L - 8}" y="${T + 12}" class="lb2" text-anchor="end">產線 WIP</text>
+        <text x="${L - 8}" y="${T + 24}" class="lb" text-anchor="end">${line.limit ? `上限 ${line.limit} 件` : "不限"}</text>
+        <rect x="${L}" y="${T + 3}" width="${W - L - R}" height="22" rx="3" class="gtrack"/>` + wipStrip(line.timeline, T + 3, 22, "整條產線");
+    }
     g.stations.forEach((st, i) => {
-      const y = T + i * row;
+      const y = tops[i];
       svg += `<text x="${L - 8}" y="${y + row / 2 + 4}" class="lb2" text-anchor="end">${esc(st)}${st === bott ? " ★" : ""}</text>`;
       // 好幾個人同時做：分成好幾條小跑道，避免格子疊在一起
       const k = Math.max(1, servers[st] || 1), lane = (row - 10) / k, laneEnd = Array(k).fill(-1);
@@ -200,9 +222,10 @@
       });
     });
     svg += `<text x="${(L + W - R) / 2}" y="${H - 2}" class="lb" text-anchor="middle">時間（${end < 120 ? "秒" : "分:秒"}）</text>`;
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="生產過程甘特圖：各站每一件的開始與結束時間">${svg}</svg>
-      <div class="des-legend"><span><i class="busy"></i>在加工（數字 = 第幾件）</span><span><i class="blk"></i>做完送不出去（阻塞）</span><span><i class="gap"></i>空白 = 等料（閒置）</span><span>★ 瓶頸站</span></div>
-      <p class="hint">這是 ${reps} 次模擬裡的第 1 次。每次抽到的加工時間不同，圖會有一點不一樣；上面的數字是 ${reps} 次的平均。</p>`;
+    const wipTxt = line ? `${reps} 次模擬合計：整條產線 WIP 平均 ${line.avg} 件、最多 ${line.max} 件${line.limit ? `（上限 ${line.limit} 件）` : ""}。` : "";
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="生產過程甘特圖：各站每一件的開始與結束時間，以及整條產線的在製品">${svg}</svg>
+      <div class="des-legend"><span><i class="busy"></i>在加工（數字 = 第幾件）</span><span><i class="blk"></i>做完送不出去（阻塞）</span><span><i class="gap"></i>空白 = 等料（閒置）</span><span><i class="wip"></i>產線 WIP：線上同時有幾件（越深越多）</span><span>★ 瓶頸站</span></div>
+      <p class="hint">這是 ${reps} 次模擬裡的第 1 次。每次抽到的加工時間不同，圖會有一點不一樣；上面的數字是 ${reps} 次的平均。${wipTxt}</p>`;
   }
 
   let lastRes = null, resizeT = null;
@@ -211,7 +234,7 @@
     const [r, base] = lastRes;
     $("desCompareBox").hidden = !base || base === r;   // 進階設定有改才比較
     $("desCompare").innerHTML = compareChart(r, base);
-    $("desGantt").innerHTML = ganttChart(r.gantt, r.bottleneck, r.params.servers || {}, r.completed_reps);
+    $("desGantt").innerHTML = ganttChart(r);
   }
   window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(drawSimple, 150); });   // 轉向、縮放視窗時重畫
 
@@ -234,6 +257,7 @@
       ["每小時產出（預測）", `${r.throughput_per_hr} 組`],
       ["瓶頸站", `${esc(r.bottleneck)}<br><small>${r.bottleneck_share_pct}% 的模擬中是它</small>`],
       ["理論最快 Cycle Time", `${r.bound_ct_sec} 秒/組<br><small>受限於 ${esc(r.bound_station)}（平均加工時間 ÷ 人數）</small>`],
+      ["整條產線 WIP", `平均 ${r.line_wip.avg} 件、最多 ${r.line_wip.max} 件<br><small>${r.line_wip.limit ? `上限 ${r.line_wip.limit} 件` : "不限"}（時間加權平均）</small>`],
     ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
     lastRes = [r, base];
     drawSimple();
@@ -354,6 +378,7 @@
       if (i !== (s.init_wip_in ?? 0)) out.push(`${s.station} 前開始 ${i} 件`);
       if ((c ?? null) !== (s.wip_limit_in ?? null)) out.push(`${s.station} 前上限 ${c ?? "不限"}`);
     });
+    if (p.line_wip) out.push(`產線 WIP 上限 ${p.line_wip} 件`);
     return out.length ? out.join("、") : "現況（預設設定）";
   }
   function saveRecord(r, t, base) {
@@ -386,7 +411,7 @@
     if (!records.length) return;
     // 主畫面：最近 5 筆
     $("desRecent").innerHTML = `<thead><tr><th>時間</th><th>組別場次</th><th>模擬幾次</th><th>完成要多久</th><th>產線 Cycle Time</th><th>瓶頸</th></tr></thead><tbody>` +
-      records.slice(-5).reverse().map((r) => `<tr><td>${fmtAt(r.at)}</td><td>${esc(r.line)}${r.settings !== "現況（預設設定）" ? `<br><small class="muted">進階設定：${esc(r.settings)}（${fasterText(r)}）</small>` : ""}</td>
+      records.slice(-5).reverse().map((r) => `<tr><td>${fmtAt(r.at)}</td><td>${esc(r.line)}${r.settings !== "現況（預設設定）" ? `<br><small class="muted">改了：${esc(r.settings)}（${fasterText(r)}）</small>` : ""}</td>
         <td>${r.reps} 次</td><td>${r.n} 組：${fmtSec(r.makespan.mean)}</td><td>${r.ct.mean} 秒/組</td><td>${esc(r.bott)}</td></tr>`).join("") + "</tbody>";
     $("desHistTable").innerHTML = `<thead><tr><th></th><th>#</th><th>時間</th><th>組別場次</th><th>設定</th><th>資料、分布</th><th>做幾組</th><th>模擬次數</th>
       <th>完成時間（90% 範圍）</th><th>產線 CT（90% 範圍）</th><th>每小時</th><th>瓶頸</th></tr></thead><tbody>` +
@@ -580,7 +605,7 @@
     card.querySelectorAll("input[data-c]").forEach((el) => { el.value = capDefault(model.stations.find((s) => s.station === el.dataset.c) || {}); });
   };
   $("desReset").onclick = () => {
-    $("desR").value = 200; $("desSeed").value = 2026; $("desMode").value = "cont"; $("desWip").value = "db"; $("desSource").value = "round";
+    $("desR").value = 200; $("desLineWip").value = ""; $("desSeed").value = 2026; $("desMode").value = "cont"; $("desWip").value = "db"; $("desSource").value = "round";
     $("desMsg").textContent = "";
     key = ""; model = null;
     loadModel(true);

@@ -132,3 +132,7 @@ details.des-adv[open]>summary{border-bottom:1px solid var(--line);margin-bottom:
 .des-chart .gblk{fill:var(--blk)}
 .des-legend i.gap{background:var(--line);opacity:.6}
 .des-chart .seglb.sm{font-size:9px}
+/* 甘特圖上的在製品（WIP）細條 */
+.des-chart .gwip{fill:var(--idle)}
+.des-chart .wlb{fill:var(--fg);font-size:10px;font-weight:600}
+.des-legend i.wip{background:var(--idle);opacity:.45}

@@ -266,6 +266,47 @@ x2 = variability_experiment(m2, n_sets=80, reps=15, balanced=False)
 row2 = next(r for r in x2["rows"] if r["mult"] == 2.0)
 check("23 不平衡產線：緩衝 1 和 10 差不到 2%", abs(row2["cells"][0]["pct"] - row2["cells"][-1]["pct"]) < 2, True)
 
+# 24. 甘特圖（第 1 次模擬）：ST01（10 秒）→ ST02（20 秒），做 3 組，固定平均值、不限上限
+#     ST01：0~10 第 1 件、10~20 第 2 件、20~30 第 3 件
+#     ST02：10~30 第 1 件、30~50 第 2 件、50~70 第 3 件
+m = model({"ST01": 10, "ST02": 20}, [("ST01", "ST02")])
+g = run(m, 3, wip="none")["gantt"]
+check("24 甘特圖的工站", g["stations"], ["ST01", "ST02"])
+check("24 ST01 的三件", [j for j in g["jobs"] if j[0] == "ST01"], [["ST01", 0.0, 10.0, 1], ["ST01", 10.0, 20.0, 2], ["ST01", 20.0, 30.0, 3]])
+check("24 ST02 的三件", [j for j in g["jobs"] if j[0] == "ST02"], [["ST02", 10.0, 30.0, 1], ["ST02", 30.0, 50.0, 2], ["ST02", 50.0, 70.0, 3]])
+check("24 結束時間 70 秒、沒有阻塞", (g["end"], g["blocked"]), (70.0, []))
+#     ST01（10 秒）→ ST02（30 秒）→ ST03（10 秒），上限 1，做 3 組：ST01 第 3 件 30 秒做完，
+#     ST02 前已經有第 2 件在等（滿了）→ 拿著等到 40 秒（ST02 拿走第 2 件才放得進去）
+m = model({"ST01": 10, "ST02": 30, "ST03": 10}, [("ST01", "ST02"), ("ST02", "ST03")])
+r = run(m, 3, wip=1)
+check("24 阻塞時段：ST01 30~40 秒", r["gantt"]["blocked"], [["ST01", 30.0, 40.0]])
+check("24 阻塞總時間 = 阻塞 % × 完成時間", abs(sum(b - a for _, a, b in r["gantt"]["blocked"]) - r["stations"][0]["blocked_pct"] / 100 * r["makespan_sec"]["mean"]) < 0.2, True)
+
+# 25. 產線 WIP 上限（整條線同時最多幾件）：ST01（10 秒）→ ST02（20 秒），做 3 組，固定平均值、站前不限
+#     上限 1：一次只能有 1 件在線上 → ST01 0~10、ST02 10~30 做完，30 秒才投入第 2 件 …… 完成 = 30 × 3 = 90 秒
+m = model({"ST01": 10, "ST02": 20}, [("ST01", "ST02")])
+r = run(m, 3, wip="none", line_wip=1)
+check("25 上限 1：完成 90 秒", r["makespan_sec"]["mean"], 90.0)
+check("25 上限 1：ST01 第 2、3 件在 30、60 秒才開始", [j[1] for j in r["gantt"]["jobs"] if j[0] == "ST01"], [0.0, 30.0, 60.0])
+check("25 上限 1：產線 WIP 最多 1 件、平均 1 件", (r["line_wip"]["max"], r["line_wip"]["avg"]), (1, 1.0))
+check("25 上限 1：產線 WIP 時間軸", r["line_wip"]["timeline"], [[0.0, 1], [90.0, 0]])
+#     上限 2：ST01 0~10、10~20 投入 2 件後要等，第 1 組 30 秒做完才投入第 3 件（30~40）；ST02 一直忙 → 一樣 70 秒
+r = run(m, 3, wip="none", line_wip=2)
+check("25 上限 2：完成 70 秒（瓶頸一直有料，不會變慢）", r["makespan_sec"]["mean"], 70.0)
+check("25 上限 2：ST01 第 3 件 30 秒才開始", [j[1] for j in r["gantt"]["jobs"] if j[0] == "ST01"], [0.0, 10.0, 30.0])
+check("25 上限 2：產線 WIP 最多 2 件", r["line_wip"]["max"], 2)
+#     不限：20 秒時 3 件都投入 → 最多 3 件
+r = run(m, 3, wip="none")
+check("25 不限：最多 3 件、70 秒", (r["line_wip"]["max"], r["makespan_sec"]["mean"], r["line_wip"]["limit"]), (3, 70.0, None))
+#     開始時 ST02 前就有 1 件，上限 1：線上已經有 1 件 → ST01 要等它做完（20 秒）才投入
+#     ST02 0~20（初始那件）、ST01 20~30、ST02 30~50、ST01 50~60、ST02 60~80 → 80 秒
+r = run(m, 3, wip="none", init={"ST02": 1}, line_wip=1)
+check("25 開始時站前 1 件也算在產線 WIP：完成 80 秒", r["makespan_sec"]["mean"], 80.0)
+#     合流：ST01（10 秒）、ST02（30 秒）→ ST03（5 秒），做 4 組，上限 1：每組 35 秒做完才投入下一組 → 140 秒
+m = model({"ST01": 10, "ST02": 30, "ST03": 5}, [("ST01", "ST03"), ("ST02", "ST03")])
+r = run(m, 4, wip="none", line_wip=1)
+check("25 合流、上限 1：每組 35 秒 × 4 = 140 秒", r["makespan_sec"]["mean"], 140.0)
+
 fails = [x for x in results if not x[1]]
 for name, ok, msg in results:
     print(("✅ " if ok else "❌ ") + name + ("" if ok else f"：{msg}"))

@@ -263,7 +263,7 @@ class LineSim:
     """事件驅動：時間直接跳到下一個「某站做完」的時刻，在那一刻更新所有狀態。"""
 
     def __init__(self, model: dict, n_sets: int, rng: random.Random, factor: dict, servers: dict,
-                 cap: dict, mode: str, init: dict | None = None, record: bool = False):
+                 cap: dict, mode: str, init: dict | None = None, record: bool = False, line_cap: int | None = None):
         self.m, self.n, self.rng, self.mode = model, n_sets, rng, mode
         self.nodes = [s["station"] for s in model["stations"]]
         self.preds = {s["station"]: s["preds"] for s in model["stations"]}
@@ -303,6 +303,35 @@ class LineSim:
         self.gantt_jobs: list[tuple[str, float, float, int]] = []
         self.gantt_blk: list[tuple[str, float, float]] = []
         self.count = defaultdict(int)                       # 各站開工的第幾件
+        # 產線 WIP 上限（CONWIP）：整條線「已投入、還沒在終點做完」的件數到上限，起點站就先停，等終點做完一件再投入
+        #   每個起點站分開算：這站投入的件數 + 開始時就放在它下游站前的件數 − 終點已完成組數
+        self.line_cap = line_cap if line_cap and line_cap > 0 else None
+        self.roots = [v for v in self.nodes if not self.preds[v]]
+        self.init_on: dict[str, int] = {}
+        for r in self.roots:
+            down, stack = set(), [r]                        # r 的所有下游站
+            while stack:
+                for v in self.succs[stack.pop()]:
+                    if v not in down:
+                        down.add(v); stack.append(v)
+            self.init_on[r] = sum(int((init or {}).get(v, 0)) * sum(1 for p in self.preds[v] if p == r or p in down)
+                                  for v in down)
+        self.line_area, self.line_last, self.line_max = 0.0, 0.0, self.line_wip()
+        self.line_tl = [(0.0, self.line_max)] if record else None
+
+    def line_wip(self) -> int:
+        """整條產線目前的在製品件數（已投入、還沒在終點做完）"""
+        if not self.roots:
+            return 0
+        return max(self.released[r] + self.init_on[r] for r in self.roots) - len(self.done_times)
+
+    def _line_note(self, before: int) -> None:              # 產線 WIP 變了：累計時間加權、最多件數、時間軸
+        self.line_area += before * (self.t - self.line_last)
+        self.line_last = self.t
+        w = self.line_wip()
+        self.line_max = max(self.line_max, w)
+        if self.record:
+            self.line_tl.append((self.t, w))
 
     def st_wip(self, v: str) -> int:
         """v 站前的在製品件數 = 每個前站送來、還沒被拿走的件數加總"""
@@ -351,7 +380,11 @@ class LineSim:
             if not self.preds[s]:                                  # 起點站：原料無限，最多投入 N 件
                 if self.released[s] >= self.n:
                     return
+                if self.line_cap and self.released[s] + self.init_on[s] - len(self.done_times) >= self.line_cap:
+                    return                                         # 產線 WIP 已到上限：等終點做完一件
+                before = self.line_wip()
                 self.released[s] += 1
+                self._line_note(before)
             else:                                                  # 齊套：每個前站都要有 1 件
                 if any(self.buf[(p, s)] < 1 for p in self.preds[s]):
                     return
@@ -384,7 +417,12 @@ class LineSim:
     def finish(self, s: str) -> None:
         self.busy[s] -= 1
         if s == self.term:
+            before = self.line_wip()
             self.done_times.append(self.t)
+            self._line_note(before)
+            if self.line_cap:                                      # 空出一個名額 → 起點站可以再投入
+                for r in self.roots:
+                    self.try_start(r)
         elif self.succs[s]:
             if self._has_space(s):
                 self._push(s)
@@ -427,6 +465,9 @@ class LineSim:
             "buffers": {f"{a}→{b}": {"avg": (self.buf_area[(a, b)] / end) if end > 0 else 0,
                                      "max": self.buf_max[(a, b)]} for a, b in self.buf},
             "timeline": ({v: pts + [(end, pts[-1][1])] for v, pts in self.timeline.items()} if self.record else None),
+            "line": {"avg": (self.line_area + self.line_wip() * (end - self.line_last)) / end if end > 0 else 0.0,
+                     "max": self.line_max,
+                     "timeline": (self.line_tl + [(end, self.line_tl[-1][1])]) if self.record else None},
             "gantt": ({"end": end,
                        "jobs": [(s, a, min(b, end), k) for s, a, b, k in self.gantt_jobs if a < end],   # 結束時還在做的件，畫到結束為止
                        "blocked": list(self.gantt_blk)} if self.record else None),
@@ -468,8 +509,9 @@ def _merge_same_time(pts: list[tuple[float, int]]) -> list[list]:
 
 def simulate(model: dict, n_sets: int = 10, reps: int = 200, seed: int = 2026, mode: str = "cont",
              factor: dict | None = None, servers: dict | None = None, wip: str | int | dict = "db",
-             init: dict | None = None) -> dict:
+             init: dict | None = None, line_wip: int | None = None) -> dict:
     """跑 reps 次模擬。
+    line_wip（產線 WIP 上限）：整條線同時最多幾件在做；None 或 0 = 不限
     wip（站前上限）："db" = 資料庫設定（沒有用 2）；整數 = 每一站同一個上限；"none" = 不限制；
                      {工站: 上限} = 每一站分別設定（None 或 0 = 不限制）
     init（開始時站前在製品）：{工站: 件數}；沒給 = 資料庫設定（老師網頁的站前半成品初始備料）"""
@@ -495,7 +537,9 @@ def simulate(model: dict, n_sets: int = 10, reps: int = 200, seed: int = 2026, m
         if s in init_wip:
             init_wip[s] = max(0, int(v or 0))
 
-    runs = [LineSim(model, n_sets, random.Random(seed + i), factor, servers, cap, mode, init_wip, record=(i == 0)).run()
+    line_wip = int(line_wip) if line_wip not in (None, "", "none") and int(line_wip) > 0 else None
+    runs = [LineSim(model, n_sets, random.Random(seed + i), factor, servers, cap, mode, init_wip, record=(i == 0),
+                    line_cap=line_wip).run()
             for i in range(reps)]
     ok = [r for r in runs if r["finished"] >= n_sets]
     if not ok:
@@ -541,7 +585,7 @@ def simulate(model: dict, n_sets: int = 10, reps: int = 200, seed: int = 2026, m
     return {
         "ok": True, "group_id": model["group_id"], "round": model["round"], "round_label": model["round_label"],
         "params": {"n_sets": n_sets, "reps": reps, "seed": seed, "mode": mode, "wip": wip,
-                   "factor": factor, "servers": servers, "init": init_wip},
+                   "factor": factor, "servers": servers, "init": init_wip, "line_wip": line_wip},
         "completed_reps": len(ok),
         "makespan_sec": _summ(mk), "line_ct_sec": _summ(ct), "first_out_sec": _summ(first),
         "steady_sec": _summ(steady) if steady else None,
@@ -556,6 +600,10 @@ def simulate(model: dict, n_sets: int = 10, reps: int = 200, seed: int = 2026, m
                         for i, r in enumerate(runs) if r["finished"] >= n_sets],
         # 第 1 次模擬：各站前在製品隨時間的變化 [[時間, 件數], …]（畫階梯圖用）
         "wip_timeline": {v: _merge_same_time(pts) for v, pts in (runs[0]["timeline"] or {}).items()},
+        # 整條產線的在製品：上限、平均（時間加權）、最多；第 1 次模擬的時間軸
+        "line_wip": {"limit": line_wip, "avg": round(sum(r["line"]["avg"] for r in ok) / len(ok), 2),
+                     "max": max(r["line"]["max"] for r in ok),
+                     "timeline": _merge_same_time(runs[0]["line"]["timeline"] or [])},
         # 甘特圖（第 1 次模擬）：[工站, 開始秒, 結束秒, 第幾件]、阻塞 [工站, 開始秒, 結束秒]
         "gantt": ({"stations": nodes, "end": round(runs[0]["gantt"]["end"], 1),
                    "jobs": [[s, round(a, 1), round(b, 1), k] for s, a, b, k in runs[0]["gantt"]["jobs"]],
