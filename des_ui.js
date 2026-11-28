@@ -12,8 +12,7 @@
   const bar = (pct, color) => `<span class="des-bar"><i style="width:${Math.min(100, Math.max(0, pct))}%;background:${color}"></i></span>${pct.toFixed(1)}%`;
   const LEVEL_ICON = { few: "🔴", low: "🟡", ok: "🟢", best: "⭐" };
 
-  let key = "", model = null, loading = false, version = -1, modelSig = "";
-  let live = false, runBusy = false, autoAgain = false;   // 即時模擬
+  let key = "", model = null, loading = false, version = -1, runBusy = false;
 
   function target() {
     const g = $("groupSel") ? $("groupSel").value : "ALL";
@@ -128,8 +127,6 @@
       if (!m.ok) { model = null; $("desTarget").textContent = m.error; $("desStations").innerHTML = ""; $("desModelNote").textContent = ""; $("desRun").disabled = true; return; }
       const firstLoad = !model || !sameLine;
       model = m;
-      const sig = JSON.stringify([k, m]);   // 本組本場的資料真的有變才重跑（別組掃碼不會觸發）
-      if (sig !== modelSig) { modelSig = sig; if (live) setTimeout(autoRun, 0); }
       const a = m.actual;
       $("desTarget").innerHTML = `模型：<b>${esc(t.g)} ${roundLabel(t.r)}</b>　本場已完成：${a.output_sets} 組、總耗時 ${fmtSec(a.total_sec)}、產線 Cycle Time ${a.takt_sec ?? "—"} 秒/組、瓶頸 ${esc(a.bottleneck)}`;
       if (firstLoad) $("desN").value = a.output_sets || 10;
@@ -215,7 +212,6 @@
     $("desCompareBox").hidden = !base || base === r;   // 進階設定有改才比較
     $("desCompare").innerHTML = compareChart(r, base);
     $("desGantt").innerHTML = ganttChart(r.gantt, r.bottleneck, r.params.servers || {}, r.completed_reps);
-    drawLive();
   }
   window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(drawSimple, 150); });   // 轉向、縮放視窗時重畫
 
@@ -448,17 +444,17 @@
   };
   renderRecords();
 
-  async function run(opts = {}) {
+  async function run() {
     if (!model || runBusy) return;
-    const t = target(), auto = !!opts.auto;
+    const t = target();
     runBusy = true;
     $("desRun").disabled = true;
-    if (!auto) $("desMsg").textContent = "模擬中…（第一次要先下載 Python）";
+    $("desMsg").textContent = "模擬中…（第一次要先下載 Python）";
     const t0 = performance.now();
     try {
       const p = params();
       const r = await BrowserEngine.simulate(t.g, t.r, t.src, p);
-      if (!r.ok) { if (auto) liveMsg(r.error); else $("desMsg").textContent = r.error; return; }
+      if (!r.ok) { $("desMsg").textContent = r.error; return; }
       // 有改設定時，用同樣的組數、次數、亂數種子再跑一次「現況」（不改任何設定）當比較基準
       let base = r;
       if (settingsText(p) !== "現況（預設設定）") {
@@ -466,121 +462,12 @@
         if (!base.ok) base = r;
       }
       renderResult(r, base);
-      if (live) livePoint(base);
-      if (auto) liveMsg();                         // 自動重跑：不存進模擬紀錄（不然紀錄會被洗掉）
-      else {
-        saveRecord(r, t, base);
-        $("desMsg").textContent = `完成：${r.completed_reps} 次模擬，用了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`;
-      }
+      saveRecord(r, t, base);
+      $("desMsg").textContent = `完成：${r.completed_reps} 次模擬，用了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`;
     } catch (e) {
-      if (auto) liveMsg(`自動模擬失敗：${e.message}`); else $("desMsg").textContent = `模擬失敗：${e.message}`;
-    } finally {
-      runBusy = false; $("desRun").disabled = !model;
-      if (autoAgain && live) { autoAgain = false; setTimeout(autoRun, 0); }   // 跑的途中又來了新資料 → 再跑一次
-    }
+      $("desMsg").textContent = `模擬失敗：${e.message}`;
+    } finally { runBusy = false; $("desRun").disabled = !model; }
   }
-
-  // ================= 即時模擬：學生每掃碼完工一件 → 資料庫主動通知 → 自動用最新資料重跑
-  const LIVE_KEY = "desLiveHist";
-  let liveHist = [], liveLine = "", liveAt = null, liveErr = "";
-  function liveLoad(line) {
-    liveLine = line;
-    try { liveHist = JSON.parse(localStorage.getItem(LIVE_KEY) || "{}")[line] || []; } catch { liveHist = []; }
-  }
-  function liveSave() {
-    try {
-      const all = JSON.parse(localStorage.getItem(LIVE_KEY) || "{}");
-      all[liveLine] = liveHist.slice(-300);
-      localStorage.setItem(LIVE_KEY, JSON.stringify(all));
-    } catch {}
-  }
-  const lineNow = () => { const t = target(); return `${t.g}|${t.r}`; };
-  // 每次重跑記一個點：現況設定下的預測（改過人數也不影響這條線），跟目前的實際值
-  function livePoint(b) {
-    if (lineNow() !== liveLine) liveLoad(lineNow());
-    const a = model.actual;
-    const pt = { at: Date.now(), ev: a.events, sets: a.output_sets, ct: b.line_ct_sec.mean, lo: b.line_ct_sec.p5, hi: b.line_ct_sec.p95,
-      act: a.takt_sec ?? null, bn: b.bottleneck };
-    const last = liveHist[liveHist.length - 1];
-    if (last && last.ev === pt.ev) liveHist[liveHist.length - 1] = pt;     // 同樣的資料又跑一次：取代
-    else if (!last || pt.ev > last.ev) liveHist.push(pt);
-    else liveHist = [pt];                                                   // 資料變少（重新開始）：重畫
-    liveAt = new Date(); liveErr = "";
-    liveSave(); drawLive();
-  }
-  function liveMsg(err) {
-    if (err !== undefined) liveErr = err;
-    const el = $("desLiveMsg");
-    el.hidden = !live;
-    if (!live) return;
-    const st = BrowserEngine.liveState();
-    const head = st === "on" ? "⚡ <b>即時模擬中</b>：已連上資料庫通知，有人掃碼完工就自動重跑（另外每 5 秒檢查一次，以防漏掉）"
-      : st === "connecting" ? "⏳ 連線中…"
-      : "🔄 <b>即時模擬中</b>：每 5 秒自動檢查一次資料庫，有新資料就重跑";
-    const last = liveHist[liveHist.length - 1];
-    const tail = liveErr ? `｜${esc(liveErr)}`
-      : !model ? "｜等待這一場的第一筆完工資料…"
-      : liveAt && last ? `｜最後更新 ${liveAt.toLocaleTimeString("zh-TW", { hour12: false })}（本場 ${last.ev} 筆資料、完成 ${last.sets} 組）` : "";
-    el.innerHTML = head + tail;
-  }
-  async function autoRun() {
-    if (!live || !model) { liveMsg(); return; }
-    if (runBusy) { autoAgain = true; return; }
-    await run({ auto: true });
-  }
-  // 即時預測圖：橫軸 = 本場已收到幾筆完工資料，縱軸 = 預測的產線 Cycle Time（藍線 + 90% 範圍）
-  // 實際值不畫在同一張圖：實際還包含傳遞、走動、掃碼等時間，常常是預測的好幾倍，會把預測壓成一條平線
-  function liveChart(h) {
-    const W = chartW(), L = 44, R = W < 480 ? 84 : 110, T = 28, PH = 180, B = 38, H = T + PH + B;
-    const xs = h.map((p) => p.ev), x0 = Math.min(...xs), x1 = Math.max(...xs) === x0 ? x0 + 1 : Math.max(...xs);
-    const vals = h.flatMap((p) => [p.lo, p.hi]);
-    let y0 = Math.min(...vals), y1 = Math.max(...vals);
-    const pad = Math.max(1, (y1 - y0) * 0.12); y0 = Math.max(0, y0 - pad); y1 += pad;
-    const step = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find((v) => (y1 - y0) / v <= 5) || 1000;
-    y0 = Math.floor(y0 / step) * step; y1 = Math.ceil(y1 / step) * step;
-    const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + PH - ((v - y0) / (y1 - y0)) * PH;
-    const xstep = [1, 2, 5, 10, 20, 50, 100, 200, 500].find((v) => (x1 - x0) / v <= (W < 480 ? 5 : 8)) || 1000;
-    let svg = "";
-    for (let v = y0; v <= y1 + 1e-9; v += step) svg += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="grid"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" class="lb" text-anchor="end">${v}</text>`;
-    for (let v = Math.ceil(x0 / xstep) * xstep; v <= x1; v += xstep) svg += `<text x="${X(v).toFixed(1)}" y="${T + PH + 16}" class="lb" text-anchor="middle">${v}</text>`;
-    const path = (pts) => pts.map(([a, b], i) => `${i ? "L" : "M"}${X(a).toFixed(1)},${Y(b).toFixed(1)}`).join("");
-    if (h.length > 1) svg += `<path d="${path(h.map((p) => [p.ev, p.hi]))}L${h.slice().reverse().map((p) => `${X(p.ev).toFixed(1)},${Y(p.lo).toFixed(1)}`).join("L")}Z" class="lv-band"/>`;
-    if (h.length > 1) svg += `<path d="${path(h.map((p) => [p.ev, p.ct]))}" class="lv-pred"/>`;
-    const tm = (p) => new Date(p.at).toLocaleTimeString("zh-TW", { hour12: false });
-    h.forEach((p) => { svg += `<circle cx="${X(p.ev).toFixed(1)}" cy="${Y(p.ct).toFixed(1)}" r="3.5" class="lv-dot-p"><title>${tm(p)}｜${p.ev} 筆資料、完成 ${p.sets} 組｜預測 ${p.ct} 秒/組（90% 落在 ${p.lo}～${p.hi}），瓶頸 ${esc(p.bn)}</title></circle>`; });
-    const lp = h[h.length - 1];   // 線尾直接標數字
-    svg += `<text x="${(X(lp.ev) + 8).toFixed(1)}" y="${(Y(lp.ct) + 4).toFixed(1)}" class="vlb">${lp.ct} 秒/組</text>`;
-    svg += `<text x="${L - 6}" y="12" class="lb" text-anchor="end">秒/組</text>`;
-    svg += `<text x="${(L + W - R) / 2}" y="${H - 4}" class="lb" text-anchor="middle">本場已收到的完工資料（筆）</text>`;
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="即時預測：隨著完工資料增加，預測的產線 Cycle Time 變化">${svg}</svg>
-      <div class="des-legend"><span><i class="pred"></i>預測的產線 Cycle Time（現況）</span><span><i class="pband"></i>90% 的模擬落在這個範圍</span></div>`;
-  }
-  function drawLive() {
-    const line = lineNow();
-    if (line !== liveLine) liveLoad(line);
-    const box = $("desLiveBox");
-    box.hidden = !liveHist.length || (!live && liveHist.length < 2);
-    if (box.hidden) return;
-    $("desLiveChart").innerHTML = liveChart(liveHist);
-    const p = liveHist[liveHist.length - 1];
-    const actTxt = p.act != null ? `實際到目前完成 ${p.sets} 組、產線 Cycle Time ${p.act} 秒/組（實際還包含傳遞、走動、掃碼等時間，所以通常比模擬慢）。` : "";
-    $("desLiveNote").textContent = liveHist.length < 3
-      ? `剛開始資料少，預測會跳來跳去；做越多件，藍線會越來越穩定。${actTxt}`
-      : `目前 ${p.ev} 筆資料：預測產線 Cycle Time ${p.ct} 秒/組（90% 落在 ${p.lo}～${p.hi}），瓶頸 ${p.bn}。藍色範圍越窄、線越平，代表預測越穩定。${actTxt}`;
-  }
-  $("desLiveClear").onclick = () => { liveHist = []; liveSave(); drawLive(); };
-  $("desLive").onchange = () => {
-    live = $("desLive").checked;
-    if (live) {
-      liveErr = "";
-      BrowserEngine.liveOn(checkData, () => liveMsg());   // 資料庫一有新紀錄就檢查
-      autoRun();
-    } else {
-      BrowserEngine.liveOff();
-      autoAgain = false;
-    }
-    liveMsg(); drawLive();
-  };
 
   // ================= 變異與緩衝實驗（變異越大 → 需要越多緩衝 → 才能維持相同名義產出速率）
   const expCard = $("expCard");
@@ -700,7 +587,7 @@
   };
   // 上方的組別、場次一改就重建模型（app.js 也可能用網址參數設定選擇，所以定時檢查）
   setInterval(() => { if (!loading) loadModel(); }, 800);
-  // 即時：每 5 秒讀一次資料庫，有新完成的紀錄就更新各站經驗分布（保留改過的倍率、人數）
+  // 每 5 秒輕量檢查一次資料庫，有新完成的紀錄就更新各站經驗分布（保留改過的倍率、人數）
   let checking = false, checkAgain = false;
   async function checkData() {
     if (checking || loading) { checkAgain = true; return; }
@@ -708,7 +595,7 @@
     checking = true;
     try {
       const v = await BrowserEngine.desRefresh();
-      if (v !== version || (live && !model)) await loadModel(true);   // 資料有新版本 → 重建模型
+      if (v !== version) await loadModel(true);   // 資料有新版本 → 重建模型
     } catch {}
     finally {
       checking = false;

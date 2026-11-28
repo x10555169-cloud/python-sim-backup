@@ -72,10 +72,8 @@
         <label>模擬幾次 <input id="desR" type="number" min="10" max="2000" step="10" value="200"></label>
         <button id="desRun" class="primary" disabled>▶ 跑模擬</button>
         <button id="desReset">還原預設</button>
-        <label class="des-live"><input type="checkbox" id="desLive"> 即時模擬（邊做邊更新）</label>
         <span class="hint" id="desMsg" role="status"></span>
       </div>
-      <p class="hint des-live-msg" id="desLiveMsg" role="status" hidden></p>
       <div class="table-wrap"><table id="desStations"></table></div>
       <p class="hint" id="desDataLine"></p>
 
@@ -111,11 +109,6 @@
 
       <div id="desResult" hidden>
         <dl class="stats" id="desStats"></dl>
-        <div id="desLiveBox" hidden>
-          <h3 class="des-h3">即時預測 <span class="sub">每收到新的完工資料就重跑一次；資料越多，預測越穩定</span></h3>
-          <div class="des-chart" id="desLiveChart"></div>
-          <p class="hint"><span id="desLiveNote"></span> <button id="desLiveClear" class="linkish">清除這張圖</button></p>
-        </div>
         <div id="desCompareBox" hidden>
           <h3 class="des-h3">現況 vs 這次設定 <span class="sub">產線 Cycle Time（越短越快）</span></h3>
           <div class="des-chart" id="desCompare"></div>

@@ -169,42 +169,6 @@ def des_experiment(group, rnd, source, data_json, params_json):
     return lastData;
   }
 
-  // ---------- 4. 即時：資料庫主動通知（Supabase Realtime），通知斷線時靠模擬區塊每 5 秒的檢查補上 ----------
-  const RT_URL = C.SUPABASE_JS_URL || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
-  const rt = { state: "off", client: null, channel: null, onChange: null, onState: null, timer: null };
-  function rtSet(state) { rt.state = state; if (rt.onState) rt.onState(state); }
-  async function liveOn(onChange, onState) {
-    rt.onChange = onChange; rt.onState = onState;
-    if (rt.channel) { rtSet(rt.state); return; }
-    rtSet("connecting");
-    try {
-      if (!(window.supabase && window.supabase.createClient)) {
-        await new Promise((ok, fail) => {
-          const s = document.createElement("script");
-          s.src = RT_URL; s.onload = ok; s.onerror = () => fail(new Error("即時通知元件下載失敗"));
-          document.head.appendChild(s);
-        });
-      }
-      rt.client = rt.client || window.supabase.createClient(SB, KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-      const fire = () => {   // 很多組同時掃碼時，0.8 秒內的通知合併成一次
-        clearTimeout(rt.timer);
-        rt.timer = setTimeout(() => { lastDataAt = 0; if (rt.onChange) rt.onChange(); }, 800);
-      };
-      rt.channel = rt.client.channel(`sim-live-${Math.random().toString(36).slice(2, 8)}`);
-      for (const table of ["event", "station_flow", "station_wip"]) rt.channel.on("postgres_changes", { event: "*", schema: "public", table }, fire);
-      rt.channel.subscribe((st) => {
-        if (st === "SUBSCRIBED") rtSet("on");
-        else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT" || st === "CLOSED") { if (rt.channel) rtSet("fail"); }
-      });
-    } catch { rt.channel = null; rtSet("fail"); }
-  }
-  function liveOff() {
-    clearTimeout(rt.timer);
-    rt.onChange = null; rt.onState = null;
-    if (rt.channel && rt.client) { const ch = rt.channel; rt.channel = null; rt.client.removeChannel(ch).catch(() => {}); }
-    rt.state = "off";
-  }
-
   window.BrowserEngine = {
     // 離散事件模擬：model = 看模型（工站、流程、作業時間、緩衝區上限），simulate = 跑模擬
     async desModel(group, round, source = "round") { const py = await loadPython(); return py.desModel(group, round, source, await desData()); },
@@ -212,7 +176,6 @@ def des_experiment(group, rnd, source, data_json, params_json):
     async experiment(group, round, source, params) { const py = await loadPython(); return py.desExp(group, round, source, await desData(), params); },
     async desRefresh() { await desData(0); return dataVersion; },  // 輕量檢查一次，有新資料才整批重抓；回傳資料版本
     dataVersion: () => dataVersion,
-    liveOn, liveOff, liveState: () => rt.state,                    // 即時模擬：資料庫主動通知
     pythonInfo: () => (pyReady ? "載入中或已載入" : "尚未載入"),
     loadPython,
     // 打開網頁先算一次（跟 Render 的 startup_snapshot 一樣），不算在執行次數裡
