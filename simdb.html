@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>模擬資料 API</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>模擬資料 API</h1>
+    <div id="conn" class="pill">連線中…</div>
+  </header>
+  <nav class="topnav" aria-label="相關連結">
+    <a href="./">前端網頁</a>
+    <a href="simdb.html" aria-current="page">模擬資料 API</a>
+    <a href="api.html">老師 API Dashboard</a>
+    <a href="docs.html" target="_blank" rel="noopener">系統說明</a>
+  </nav>
+
+  <main>
+    <section class="card">
+      <h2>連線資訊 <span class="sub">做 dashboard 時要用的網址和金鑰（可以公開，只能讀，不能改或刪資料）</span></h2>
+      <div class="sa-kv">
+        <span class="sa-k">網址</span><code id="saUrl" class="sa-code">—</code><button class="sa-copy" data-copy="saUrl">複製</button>
+        <span class="sa-k">金鑰</span><code id="saKey" class="sa-code">—</code><button class="sa-copy" data-copy="saKey">複製</button>
+      </div>
+      <p class="hint">讀資料 = 網址 + 表名 + 條件，請求時把金鑰放在 <code>apikey</code> 標頭。資料是同學在「經驗分布模擬」按「💾 存到資料庫」存進來的。</p>
+    </section>
+
+    <section class="card">
+      <h2>查詢 <span class="sub">選好條件按「查詢」，下面會顯示資料、API 網址和程式碼</span></h2>
+      <div class="sa-form">
+        <label>資料表
+          <select id="saTable">
+            <option value="sim_run">sim_run：模擬紀錄（每存一次一筆）</option>
+            <option value="sim_station">sim_station：每一站的結果</option>
+            <option value="sim_rep">sim_rep：每一次模擬的結果</option>
+          </select></label>
+        <label id="saGroupL">組別 <select id="saGroup"><option value="">全部</option></select></label>
+        <label id="saRoundL">場次 <select id="saRound"><option value="">全部</option></select></label>
+        <label id="saRunL" hidden>哪一筆模擬紀錄 <select id="saRun"></select></label>
+        <label>排序
+          <select id="saOrder"><option value="desc">新的在前</option><option value="asc">舊的在前</option></select></label>
+        <label>最多幾筆
+          <select id="saLimit"><option>10</option><option selected>50</option><option>200</option><option value="">全部</option></select></label>
+        <label class="sa-chk"><input type="checkbox" id="saAll"> 顯示全部欄位</label>
+        <button id="saGo" class="primary">查詢</button>
+      </div>
+      <p class="hint" id="saMsg" role="status"></p>
+
+      <h3 class="des-h3">API 網址 <span class="sub">程式要讀的就是這個網址</span></h3>
+      <div class="sa-line"><code id="saApi" class="sa-code sa-wrap">—</code><button class="sa-copy" data-copy="saApi">複製</button></div>
+
+      <h3 class="des-h3">查詢結果 <span class="sub" id="saCount"></span></h3>
+      <div class="table-wrap sa-result"><table id="saTableOut"></table></div>
+      <div class="row sa-actions">
+        <button id="saCsv" disabled>下載 CSV</button>
+        <details class="sa-json"><summary>看原始資料（JSON，程式拿到的長這樣）</summary><pre id="saJson" class="sa-pre"></pre></details>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>程式碼 <span class="sub">複製去改就能做自己的 dashboard；條件會跟著上面的查詢自動更新</span></h2>
+      <div class="sa-tabs" role="tablist">
+        <button role="tab" class="sa-tab" data-tab="py" aria-selected="true">Python</button>
+        <button role="tab" class="sa-tab" data-tab="js" aria-selected="false">JavaScript</button>
+      </div>
+      <div class="sa-codebox"><button class="sa-copy sa-copy-abs" data-copy="saCode">複製</button><pre id="saCode" class="sa-pre"></pre></div>
+    </section>
+
+    <section class="card">
+      <h2>欄位說明 <span class="sub" id="saFieldsSub"></span></h2>
+      <div class="table-wrap"><table id="saFields" class="sa-fields"></table></div>
+      <h3 class="des-h3">常用條件寫法</h3>
+      <div class="table-wrap"><table class="sa-fields">
+        <thead><tr><th>寫法</th><th>意思</th><th>例子</th></tr></thead>
+        <tbody>
+          <tr><td><code>eq.</code></td><td>等於</td><td><code>group_id=eq.G20</code></td></tr>
+          <tr><td><code>neq.</code></td><td>不等於</td><td><code>round=neq.FORMAL</code></td></tr>
+          <tr><td><code>gt.</code> / <code>gte.</code></td><td>大於 / 大於等於</td><td><code>n_sets=gte.10</code></td></tr>
+          <tr><td><code>lt.</code> / <code>lte.</code></td><td>小於 / 小於等於</td><td><code>line_ct_mean=lt.15</code></td></tr>
+          <tr><td><code>select=</code></td><td>只要哪些欄位（逗號隔開）</td><td><code>select=id,group_id,line_ct_mean</code></td></tr>
+          <tr><td><code>order=</code></td><td>排序（<code>.desc</code> 大到小、<code>.asc</code> 小到大）</td><td><code>order=created_at.desc</code></td></tr>
+          <tr><td><code>limit=</code></td><td>最多幾筆</td><td><code>limit=10</code></td></tr>
+        </tbody></table></div>
+    </section>
+  </main>
+
+  <script src="sim_db_config.js"></script>
+  <script src="simdb.js"></script>
+</body>
+</html>

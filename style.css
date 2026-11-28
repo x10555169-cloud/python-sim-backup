@@ -137,3 +137,27 @@ details.des-adv[open]>summary{border-bottom:1px solid var(--line);margin-bottom:
 .des-chart .wlb{fill:var(--fg);font-size:10px;font-weight:600}
 .des-legend i.wip{background:var(--idle);opacity:.45}
 .des-saved{color:var(--ok)}
+/* 模擬資料 API 頁面 */
+.sa-kv{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px 10px;align-items:center}
+.sa-k{font-weight:600;font-size:14px}
+.sa-code{font:13px/1.4 ui-monospace,Consolas,monospace;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;overflow-wrap:anywhere;min-width:0}
+.sa-line{display:flex;gap:8px;align-items:flex-start}.sa-line .sa-code{flex:1}
+.sa-copy{font-size:13px;padding:6px 10px;white-space:nowrap}
+.sa-form{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end}
+.sa-form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.sa-form select{min-width:0}
+.sa-form .sa-chk{flex-direction:row;align-items:center;gap:6px;padding-bottom:10px}
+.sa-chk input{flex:none;width:16px;height:16px}
+.sa-result{max-height:460px;overflow:auto}
+.sa-result td{white-space:nowrap}
+code.sa-col{font-size:11px;color:var(--muted);font-weight:400}
+.sa-link{font-size:12px;padding:2px 6px;margin-left:4px;color:var(--accent)}
+.sa-actions{align-items:flex-start;margin-top:10px}
+.sa-json{flex:1 1 260px;min-width:0}.sa-json summary{cursor:pointer;color:var(--muted);font-size:13px;padding:8px 0}
+.sa-pre{font:12.5px/1.5 ui-monospace,Consolas,monospace;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow:auto;max-height:360px;white-space:pre}
+.sa-tabs{display:flex;gap:6px;margin-bottom:8px}
+.sa-tab[aria-selected="true"]{border-color:var(--accent);color:var(--accent);font-weight:600}
+.sa-codebox{position:relative}.sa-copy-abs{position:absolute;top:8px;right:8px}
+.sa-fields td,.sa-fields th{text-align:left!important;white-space:normal}
+
+.sa-form label[hidden]{display:none}
