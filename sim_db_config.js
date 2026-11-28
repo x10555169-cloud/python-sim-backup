@@ -4,6 +4,6 @@
 // publishable key 可以公開：資料庫設定成「只能讀、只能透過存檔函式寫入」，學生拿到也不能改或刪資料
 // 絕對不要放 secret key（sb_secret_ 開頭）或 service_role key
 window.SIM_DB = {
-  URL: "",
-  KEY: "",
+  URL: "https://ycajsyqqklshgtfqoqyt.supabase.co",
+  KEY: "sb_publishable_jbTWG4bFsK6pL-K8aIOcbg_NUEy_-gv",
 };
