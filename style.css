@@ -132,3 +132,14 @@ details.des-adv[open]>summary{border-bottom:1px solid var(--line);margin-bottom:
 .des-chart .gblk{fill:var(--blk)}
 .des-legend i.gap{background:var(--line);opacity:.6}
 .des-chart .seglb.sm{font-size:9px}
+/* 即時模擬 */
+.des-live{display:flex;align-items:center;gap:6px;font-weight:600;cursor:pointer}
+.des-live input{width:18px;height:18px;margin:0}
+.des-live-msg{margin:-4px 0 8px}
+.des-live-msg b{color:var(--accent)}
+.lv-band{fill:var(--busy);opacity:.15}
+.lv-pred{fill:none;stroke:var(--busy);stroke-width:2.5}
+.lv-dot-p{fill:var(--busy);stroke:var(--card);stroke-width:1.5}
+.des-legend i.pred{background:var(--busy);height:3px}
+.des-legend i.pband{background:var(--busy);opacity:.18}
+.linkish{background:none;border:none;color:var(--accent);padding:0 4px;cursor:pointer;font-size:inherit;text-decoration:underline}

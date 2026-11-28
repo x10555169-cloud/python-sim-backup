@@ -146,12 +146,63 @@ def des_experiment(group, rnd, source, data_json, params_json):
     timer = setInterval(() => step().catch(() => {}), INTERVAL_MS);
   }
 
-  async function desData(maxAgeMs = 5000) {   // 超過 5 秒沒讀就重新讀一次（即時用到剛完成的資料）
+  // 輕量檢查：只問 event 表「總筆數 + 最後一筆完工時間」，加上很小的流程表、站前設定表；
+  // 跟上次一樣就不用整批重抓（全班一起用時，資料庫負擔小很多）
+  let lastProbe = "";
+  async function probe() {
+    const r = await fetch(`${SB}/rest/v1/event?select=id,finish_time,status&order=finish_time.desc.nullslast,id.desc&limit=1`,
+      { headers: { ...headers, Prefer: "count=exact" } });
+    if (!r.ok) throw new Error(`讀取 event 失敗（HTTP ${r.status}）`);
+    const total = (r.headers.get("content-range") || "").split("/")[1] || "?";
+    const [last, flows, limits] = await Promise.all([r.json(), fetchFlows(), fetchLimits()]);
+    return JSON.stringify([total, last[0] || null, flows, limits]);
+  }
+  async function desData(maxAgeMs = 5000) {   // 超過 5 秒沒讀就檢查一次；有新資料才整批重抓
     if (!lastData || Date.now() - lastDataAt > maxAgeMs) {
+      let sig = null;
+      if (lastData) { try { sig = await probe(); } catch { sig = null; } }
+      if (sig && sig === lastProbe) { lastDataAt = Date.now(); return lastData; }
       const [events, flows, limits] = await Promise.all([fetchEvents(), fetchFlows(), fetchLimits()]);
       setData({ events, flows, limits });
+      lastProbe = sig || (await probe().catch(() => ""));
     }
     return lastData;
+  }
+
+  // ---------- 4. 即時：資料庫主動通知（Supabase Realtime），通知斷線時靠模擬區塊每 5 秒的檢查補上 ----------
+  const RT_URL = C.SUPABASE_JS_URL || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js";
+  const rt = { state: "off", client: null, channel: null, onChange: null, onState: null, timer: null };
+  function rtSet(state) { rt.state = state; if (rt.onState) rt.onState(state); }
+  async function liveOn(onChange, onState) {
+    rt.onChange = onChange; rt.onState = onState;
+    if (rt.channel) { rtSet(rt.state); return; }
+    rtSet("connecting");
+    try {
+      if (!(window.supabase && window.supabase.createClient)) {
+        await new Promise((ok, fail) => {
+          const s = document.createElement("script");
+          s.src = RT_URL; s.onload = ok; s.onerror = () => fail(new Error("即時通知元件下載失敗"));
+          document.head.appendChild(s);
+        });
+      }
+      rt.client = rt.client || window.supabase.createClient(SB, KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+      const fire = () => {   // 很多組同時掃碼時，0.8 秒內的通知合併成一次
+        clearTimeout(rt.timer);
+        rt.timer = setTimeout(() => { lastDataAt = 0; if (rt.onChange) rt.onChange(); }, 800);
+      };
+      rt.channel = rt.client.channel(`sim-live-${Math.random().toString(36).slice(2, 8)}`);
+      for (const table of ["event", "station_flow", "station_wip"]) rt.channel.on("postgres_changes", { event: "*", schema: "public", table }, fire);
+      rt.channel.subscribe((st) => {
+        if (st === "SUBSCRIBED") rtSet("on");
+        else if (st === "CHANNEL_ERROR" || st === "TIMED_OUT" || st === "CLOSED") { if (rt.channel) rtSet("fail"); }
+      });
+    } catch { rt.channel = null; rtSet("fail"); }
+  }
+  function liveOff() {
+    clearTimeout(rt.timer);
+    rt.onChange = null; rt.onState = null;
+    if (rt.channel && rt.client) { const ch = rt.channel; rt.channel = null; rt.client.removeChannel(ch).catch(() => {}); }
+    rt.state = "off";
   }
 
   window.BrowserEngine = {
@@ -159,7 +210,9 @@ def des_experiment(group, rnd, source, data_json, params_json):
     async desModel(group, round, source = "round") { const py = await loadPython(); return py.desModel(group, round, source, await desData()); },
     async simulate(group, round, source, params) { const py = await loadPython(); return py.desRun(group, round, source, await desData(), params); },
     async experiment(group, round, source, params) { const py = await loadPython(); return py.desExp(group, round, source, await desData(), params); },
-    async desRefresh() { await desData(); return dataVersion; },   // 讀最新資料，回傳資料版本
+    async desRefresh() { await desData(0); return dataVersion; },  // 輕量檢查一次，有新資料才整批重抓；回傳資料版本
+    dataVersion: () => dataVersion,
+    liveOn, liveOff, liveState: () => rt.state,                    // 即時模擬：資料庫主動通知
     pythonInfo: () => (pyReady ? "載入中或已載入" : "尚未載入"),
     loadPython,
     // 打開網頁先算一次（跟 Render 的 startup_snapshot 一樣），不算在執行次數裡

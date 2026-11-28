@@ -65,14 +65,17 @@
     </section>
 
     <section class="card" id="desCard" hidden>
-      <h2>經驗分布模擬 <span class="sub">改人數或作業時間，看產線會變多快</span></h2>
+      <h2>經驗分布模擬 <span class="sub">用這一場實際的加工時間，預測產線要做多久</span></h2>
       <p class="hint" id="desTarget"></p>
       <div class="des-top">
         <label>要生產幾組 <input id="desN" type="number" min="1" max="200" value="10"></label>
+        <label>模擬幾次 <input id="desR" type="number" min="10" max="2000" step="10" value="200"></label>
         <button id="desRun" class="primary" disabled>▶ 跑模擬</button>
         <button id="desReset">還原預設</button>
+        <label class="des-live"><input type="checkbox" id="desLive"> 即時模擬（邊做邊更新）</label>
         <span class="hint" id="desMsg" role="status"></span>
       </div>
+      <p class="hint des-live-msg" id="desLiveMsg" role="status" hidden></p>
       <div class="table-wrap"><table id="desStations"></table></div>
       <p class="hint" id="desDataLine"></p>
 
@@ -91,7 +94,6 @@
               <option value="disc">離散型（重抽樣原始值）</option>
               <option value="mean">固定平均值（沒有波動，比較用）</option>
             </select></label>
-          <label>重複模擬次數<input id="desR" type="number" min="10" max="2000" value="200"></label>
           <label>站前上限（一次設定全部）
             <select id="desWip">
               <option value="db">資料庫設定（沒設定用 2）</option>
@@ -109,8 +111,15 @@
 
       <div id="desResult" hidden>
         <dl class="stats" id="desStats"></dl>
-        <h3 class="des-h3">現況 vs 這次設定 <span class="sub">產線 Cycle Time（越短越快）</span></h3>
-        <div class="des-chart" id="desCompare"></div>
+        <div id="desLiveBox" hidden>
+          <h3 class="des-h3">即時預測 <span class="sub">每收到新的完工資料就重跑一次；資料越多，預測越穩定</span></h3>
+          <div class="des-chart" id="desLiveChart"></div>
+          <p class="hint"><span id="desLiveNote"></span> <button id="desLiveClear" class="linkish">清除這張圖</button></p>
+        </div>
+        <div id="desCompareBox" hidden>
+          <h3 class="des-h3">現況 vs 這次設定 <span class="sub">產線 Cycle Time（越短越快）</span></h3>
+          <div class="des-chart" id="desCompare"></div>
+        </div>
         <h3 class="des-h3">生產過程（甘特圖） <span class="sub">每一列是一站，每一格是一件，格子裡的數字是第幾件</span></h3>
         <div class="des-chart" id="desGantt"></div>
         <div id="desRecentBox" hidden>
