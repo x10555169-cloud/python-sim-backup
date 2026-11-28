@@ -488,7 +488,8 @@
       }
       renderResult(r, base);
       saveRecord(r, t, base);
-      $("desMsg").textContent = `完成：${r.completed_reps} 次模擬，用了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`;
+      $("desMsg").textContent = `完成：${r.completed_reps} 次模擬，用了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` +
+        (p.line_wip && p.line_wip >= p.n_sets ? `。提醒：產線 WIP 上限 ${p.line_wip} 件 ≥ 要生產的 ${p.n_sets} 組，線上不可能超過 ${p.n_sets} 件，所以上限不會有作用` : "");
     } catch (e) {
       $("desMsg").textContent = `模擬失敗：${e.message}`;
     } finally { runBusy = false; $("desRun").disabled = !model; }

@@ -201,15 +201,18 @@ check("18 ST02 前最多 1 件", r["stations"][1]["wip_max"], 1)
 check("18 ST01 被擋住（有阻塞）", r["stations"][0]["blocked_pct"] > 0, True)
 check("18 完成時間 110 秒（同第 7 項）", r["makespan_sec"]["mean"], 110)
 
-# 19. 從資料庫讀「開始時站前在製品」：station_wip 的 G01-T1 / ST02 列 input_wip = 2（老師網頁的站前半成品初始備料）
+# 19. 開始時站前在製品一律從 0 開始：station_wip 的 G01-T1 / ST02 列 input_wip = 10 是生產時的計數，不讀
+#     （G20 第 2 次測試就是這樣：各站 8~10 件，當成開始時件數會讓產線一開始就塞滿）；上限（_LIMIT）照常讀
 m = model({"ST01": 10, "ST02": 20}, [("ST01", "ST02")],
-          limits=[{"group_id": "G01-T1", "station_id": "ST02", "input_wip": 2},
+          limits=[{"group_id": "G01-T1", "station_id": "ST02", "input_wip": 10},
                   {"group_id": "G01-T1", "station_id": "ST02_LIMIT", "input_wip": 3}])
-check("19 讀到 ST02 開始時 2 件", m["init_wip"]["ST02"], 2)
+check("19 開始時 ST02 前 0 件（不讀 input_wip 計數）", m["init_wip"]["ST02"], 0)
+check("19 上限照常讀到 3", m["wip_limits"]["ST02"], 3)
 check("19 起點站 ST01 沒有站前在製品", "ST01" in m["init_wip"], False)
 r = run(m, 3, wip="none")
-check("19 沒指定 init 時用資料庫的 2 件", r["stations"][1]["init_wip"], 2)
-check("19 ST02 前最多 2 件", r["stations"][1]["wip_max"] >= 2, True)
+check("19 從空的產線開始：10 + 20 × 3 = 70 秒", r["makespan_sec"]["mean"], 70.0)
+r = run(m, 3, wip="none", init={"ST02": 2})
+check("19 手動填 2 件仍然有效", (r["stations"][1]["init_wip"], r["stations"][1]["wip_max"] >= 2), (2, True))
 #     合流站：每個前站各放 k 件（= k 套）
 m = model({"ST01": 10, "ST02": 30, "ST03": 5}, [("ST01", "ST03"), ("ST02", "ST03")])
 r = run(m, 4, wip="none", init={"ST03": 1})

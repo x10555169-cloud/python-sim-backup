@@ -29,7 +29,9 @@
   起點站       原料無限，最多投入 N 件（N = 要生產的組數）
   站前在製品   每站前面的緩衝區（前站做好、本站還沒拿的半成品），每一站可以分別設定：
                上限       = station_wip 的「ST05_LIMIT」，沒設定用 2（同老師網頁）；可改成不限制
-               開始時件數 = station_wip 的「ST05」列 input_wip（老師網頁的「站前半成品初始備料」），沒設定為 0
+               開始時件數 = 0（空的產線開始）；可在進階設定手動填。
+                            不讀 station_wip「ST05」列的 input_wip：那是生產時掃碼留下的計數（做完後的狀態），
+                            當成開始時件數會讓產線一開始就塞滿
   阻塞         做完時下一站的緩衝區滿了 → 拿著成品等（佔住人手），直到有空位
   人數         每站幾個人（同時能做幾件），預設 1
   結束         終點站完成 N 組
@@ -42,7 +44,6 @@ from __future__ import annotations
 
 import heapq
 import random
-import re
 from collections import defaultdict, deque
 
 from simulation import analyze_line, edges_of, flow_for, round_label, round_of, round_sort_key, terminal_station
@@ -159,7 +160,7 @@ def build_model(events: list[dict], flows: list[dict], limits: list[dict], group
     times: dict[str, list[float]] = {}
     stations = []
     lim = _wip_limits(limits, group, rnd)
-    init = _init_wip(limits, group, rnd)
+    init: dict[str, int] = {}                          # 開始時站前在製品：預設 0（空的產線）
     for s in nodes:
         own = _durations(rows, s)
         added, used = [], ["本場"]
@@ -203,7 +204,7 @@ def build_model(events: list[dict], flows: list[dict], limits: list[dict], group
         "wip_limits": {s: lim.get(s, DEFAULT_WIP_LIMIT) for s in nodes if preds[s]},
         "wip_limit_source": "station_wip 的 _LIMIT 設定" if lim else f"沒有設定 → 預設 {DEFAULT_WIP_LIMIT}",
         "init_wip": {s: init.get(s, 0) for s in nodes if preds[s]},
-        "init_wip_source": "老師設定的站前半成品初始備料" if any(init.get(s) for s in nodes if preds[s]) else "沒有設定 → 開始時站前都是 0 件",
+        "init_wip_source": "從空的產線開始（各站前 0 件）；可在進階設定手動填",
         "missing_data": missing, "ignored_stations": [s for s in with_data if s not in nodes],
         "other_rounds": [{k: v for k, v in ri.items() if k != "rows"} for ri in rounds_info],   # 本組其他場次：能不能加入、原因
         "min_samples": min((len(times[s]) for s in nodes if s not in missing), default=0),
@@ -222,23 +223,6 @@ def _flow_signature(edges: list[tuple[str, str]]) -> tuple:
 
 def _flow_text(edges: list[tuple[str, str]]) -> str:
     return "、".join(f"{a}→{b}" for a, b in sorted(edges) if b) or "無"
-
-
-def _init_wip(rows: list[dict], group: str, rnd: str) -> dict[str, int]:
-    """station_wip 裡本場（例如 G09-T1）的「ST03」列 input_wip = 開始時 ST03 前面已經有幾件（套）半成品
-    （老師網頁「站前半成品初始備料」存在這裡）。沒有設定 = 0。"""
-    want = f"{group}-OFFICIAL" if rnd == "FORMAL" else f"{group}-T{rnd[4:]}"
-    out: dict[str, int] = {}
-    for r in rows or []:
-        sid = (r.get("station_id") or "").strip()
-        if (r.get("group_id") or "").strip() == want and re.fullmatch(r"ST\d+", sid):
-            try:
-                v = int(float(r.get("input_wip") or 0))
-            except (TypeError, ValueError):
-                v = 0
-            if v > 0:
-                out[sid] = v
-    return out
 
 
 def _wip_limits(limits: list[dict], group: str, rnd: str) -> dict[str, int]:
@@ -514,7 +498,7 @@ def simulate(model: dict, n_sets: int = 10, reps: int = 200, seed: int = 2026, m
     line_wip（產線 WIP 上限）：整條線同時最多幾件在做；None 或 0 = 不限
     wip（站前上限）："db" = 資料庫設定（沒有用 2）；整數 = 每一站同一個上限；"none" = 不限制；
                      {工站: 上限} = 每一站分別設定（None 或 0 = 不限制）
-    init（開始時站前在製品）：{工站: 件數}；沒給 = 資料庫設定（老師網頁的站前半成品初始備料）"""
+    init（開始時站前在製品）：{工站: 件數}；沒給 = 0（空的產線開始）"""
     if not model.get("ok"):
         return model
     mode = {"sample": "disc"}.get(mode, mode) if mode in ("cont", "disc", "mean", "sample") else "cont"
