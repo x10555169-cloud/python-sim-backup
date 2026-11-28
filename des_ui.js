@@ -144,7 +144,7 @@
     const wip = {}, init = {};   // 每一站分別設定：站前上限（空白 = 不限）、開始時站前在製品
     card.querySelectorAll("input[data-c]").forEach((el) => { const v = Math.round(Number(el.value)); wip[el.dataset.c] = el.value.trim() !== "" && v > 0 ? v : null; });
     card.querySelectorAll("input[data-i]").forEach((el) => { init[el.dataset.i] = Math.max(0, Math.round(Number(el.value) || 0)); });
-    return { n_sets: Math.max(1, Math.round(Number($("desN").value) || 10)), reps: Math.max(10, Math.min(2000, Math.round(Number($("desR").value) || 200))),
+    return { n_sets: Math.max(1, Math.min(200, Math.round(Number($("desN").value) || 10))), reps: Math.max(10, Math.min(2000, Math.round(Number($("desR").value) || 200))),
       seed: Math.round(Number($("desSeed").value) || 2026), mode: $("desMode").value, wip, init, factor, servers,
       line_wip: Math.round(Number($("desLineWip").value)) > 0 ? Math.round(Number($("desLineWip").value)) : null };
   }
@@ -398,6 +398,7 @@
     checked.add(rec.id);
     persist();
     renderRecords();
+    return rec;
   }
   const fmtAt = (iso) => new Date(iso).toLocaleString("zh-TW", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   const fasterText = (r) => {
@@ -411,7 +412,7 @@
     if (!records.length) return;
     // 主畫面：最近 5 筆
     $("desRecent").innerHTML = `<thead><tr><th>時間</th><th>組別場次</th><th>模擬幾次</th><th>完成要多久</th><th>產線 Cycle Time</th><th>瓶頸</th></tr></thead><tbody>` +
-      records.slice(-5).reverse().map((r) => `<tr><td>${fmtAt(r.at)}</td><td>${esc(r.line)}${r.settings !== "現況（預設設定）" ? `<br><small class="muted">改了：${esc(r.settings)}（${fasterText(r)}）</small>` : ""}</td>
+      records.slice(-5).reverse().map((r) => `<tr><td>${fmtAt(r.at)}${r.dbId ? `<br><small class="des-saved">💾 已存 #${r.dbId}</small>` : ""}</td><td>${esc(r.line)}${r.settings !== "現況（預設設定）" ? `<br><small class="muted">改了：${esc(r.settings)}（${fasterText(r)}）</small>` : ""}</td>
         <td>${r.reps} 次</td><td>${r.n} 組：${fmtSec(r.makespan.mean)}</td><td>${r.ct.mean} 秒/組</td><td>${esc(r.bott)}</td></tr>`).join("") + "</tbody>";
     $("desHistTable").innerHTML = `<thead><tr><th></th><th>#</th><th>時間</th><th>組別場次</th><th>設定</th><th>資料、分布</th><th>做幾組</th><th>模擬次數</th>
       <th>完成時間（90% 範圍）</th><th>產線 CT（90% 範圍）</th><th>每小時</th><th>瓶頸</th></tr></thead><tbody>` +
@@ -477,7 +478,7 @@
     $("desMsg").textContent = "模擬中…（第一次要先下載 Python）";
     const t0 = performance.now();
     try {
-      const p = params();
+      const p = params(), sig0 = inputSig();     // 跑之前的設定（跑的途中改了設定，就不能存）
       const r = await BrowserEngine.simulate(t.g, t.r, t.src, p);
       if (!r.ok) { $("desMsg").textContent = r.error; return; }
       // 有改設定時，用同樣的組數、次數、亂數種子再跑一次「現況」（不改任何設定）當比較基準
@@ -487,13 +488,95 @@
         if (!base.ok) base = r;
       }
       renderResult(r, base);
-      saveRecord(r, t, base);
+      const rec = saveRecord(r, t, base);
+      lastRun = { r, p, t, rec, sig: sig0, model: { actual: { ...model.actual }, source_label: model.source_label, round_label: model.round_label }, dbId: null };
+      dbButton();
       $("desMsg").textContent = `完成：${r.completed_reps} 次模擬，用了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` +
         (p.line_wip && p.line_wip >= p.n_sets ? `。提醒：產線 WIP 上限 ${p.line_wip} 件 ≥ 要生產的 ${p.n_sets} 組，線上不可能超過 ${p.n_sets} 件，所以上限不會有作用` : "");
     } catch (e) {
       $("desMsg").textContent = `模擬失敗：${e.message}`;
     } finally { runBusy = false; $("desRun").disabled = !model; }
   }
+
+  // ================= 存到資料庫（模擬結果資料庫，跟老師的資料庫分開；設定在 sim_db_config.js）
+  //   防呆：沒跑過不能存、跑完又改了設定不能存、同一次結果只能存一次、存之前要確認、存的途中不能重按
+  const SIM_DB = window.SIM_DB || {};
+  const DB_URL = (SIM_DB.URL || "").replace(/\/$/, ""), DB_KEY = SIM_DB.KEY || "";
+  let lastRun = null, dbBusy = false;
+  // 目前畫面上所有設定（組別、場次、資料來源、分布、組數、次數、種子、人數、倍率、站前設定、產線 WIP 上限）
+  const inputSig = () => JSON.stringify([target(), params()]);
+  function dbButton() {
+    const b = $("desSave");
+    if (!b) return;
+    if (!DB_URL || !DB_KEY) { b.disabled = true; b.title = "還沒設定模擬資料庫（sim_db_config.js）"; b.textContent = "💾 存到資料庫"; return; }
+    if (dbBusy) { b.disabled = true; b.textContent = "存檔中…"; return; }
+    if (!lastRun) { b.disabled = true; b.title = "先按「跑模擬」，跑完才能存"; b.textContent = "💾 存到資料庫"; return; }
+    if (lastRun.dbId) { b.disabled = true; b.title = "這次的結果已經存過了"; b.textContent = `✓ 已存（#${lastRun.dbId}）`; return; }
+    if (lastRun.sig !== inputSig()) { b.disabled = true; b.title = "設定改過了，畫面上的結果不是現在的設定；請先按「跑模擬」"; b.textContent = "💾 存到資料庫"; return; }
+    b.disabled = false; b.title = "把這次模擬的結果存到模擬資料庫（存了之後不能修改或刪除）"; b.textContent = "💾 存到資料庫";
+  }
+  card.addEventListener("input", dbButton);
+  card.addEventListener("change", dbButton);
+  setInterval(dbButton, 1000);   // 上方換組別、場次時也要更新
+  const n2 = (v) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+  function dbPayload(L) {
+    const { r, p, t, model: m } = L, st = r.stations;
+    return {
+      group_id: t.g, round: t.r, round_label: m.round_label || roundLabel(t.r), data_source: m.source_label, dist_mode: r.params.mode,
+      n_sets: r.params.n_sets, reps_count: r.reps_detail.length, seed: r.params.seed, line_wip_limit: r.line_wip?.limit ?? null,
+      settings_text: settingsText(p),
+      settings: { servers: r.params.servers || {}, time_factor: r.params.factor || {}, init_wip: r.params.init || {},
+        wip_limit: Object.fromEntries(st.filter((s) => s.wip_avg !== undefined).map((s) => [s.station, s.wip_limit ?? null])),
+        line_wip_limit: r.line_wip?.limit ?? null },
+      makespan_mean: r.makespan_sec.mean, makespan_p5: r.makespan_sec.p5, makespan_p95: r.makespan_sec.p95,
+      line_ct_mean: r.line_ct_sec.mean, line_ct_p5: r.line_ct_sec.p5, line_ct_p95: r.line_ct_sec.p95,
+      throughput_per_hr: r.throughput_per_hr, bottleneck: r.bottleneck, bottleneck_share_pct: r.bottleneck_share_pct,
+      bound_station: r.bound_station, bound_ct_sec: r.bound_ct_sec,
+      line_wip_avg: r.line_wip?.avg ?? null, line_wip_max: r.line_wip?.max ?? null,
+      actual_sets: m.actual.output_sets ?? null, actual_total_sec: n2(m.actual.total_sec), actual_ct_sec: n2(m.actual.takt_sec),
+      actual_bottleneck: m.actual.bottleneck ?? null, min_samples: r.min_samples, data_events: m.actual.events ?? null,
+      gantt: r.gantt || null,
+      stations: st.map((s) => ({ station: s.station, servers: s.servers, time_factor: s.factor, eff_time_sec: s.eff_time,
+        samples: r.samples?.[s.station] ?? null, util_pct: s.util_pct, blocked_pct: s.blocked_pct, starved_pct: s.starved_pct,
+        bottleneck_share_pct: s.bottleneck_share_pct, init_wip: s.init_wip ?? null, wip_limit: s.wip_limit ?? null,
+        wip_avg: s.wip_avg ?? null, wip_max: s.wip_max ?? null, wip_end: s.wip_end ?? null, wait_avg_sec: s.wait_avg ?? null })),
+      reps: r.reps_detail.map((d) => ({ rep_no: d.i, seed: d.seed, makespan_sec: d.makespan, ct_sec: d.ct, bottleneck: d.bottleneck })),
+    };
+  }
+  function dbError(j, status) {
+    const msg = (j && (j.message || j.error)) || `HTTP ${status}`;
+    if (/check constraint/.test(msg)) return "有數字不在合理範圍，資料庫沒有存（例如要生產幾組要在 1～200、模擬幾次要在 10～2000）";
+    if (/permission denied|Could not find the function|PGRST202/.test(msg)) return "模擬資料庫還沒建好表，請先在 Supabase 執行 sim_db_schema.sql";
+    return msg;
+  }
+  async function saveToDb() {
+    const L = lastRun;
+    if (dbBusy || !L || L.dbId || !DB_URL) return;
+    if (L.sig !== inputSig()) { $("desMsg").textContent = "設定改過了，請先按「跑模擬」再存"; dbButton(); return; }
+    const r = L.r;
+    const ok = confirm(`確定要把這次模擬存到資料庫嗎？\n\n${L.t.g} ${roundLabel(L.t.r)}｜做 ${r.params.n_sets} 組｜模擬 ${r.reps_detail.length} 次` +
+      `${r.line_wip?.limit ? `｜產線 WIP 上限 ${r.line_wip.limit} 件` : ""}\n改了：${settingsText(L.p)}\n` +
+      `結果：完成 ${fmtSec(r.makespan_sec.mean)}、產線 Cycle Time ${r.line_ct_sec.mean} 秒/組、瓶頸 ${r.bottleneck}\n\n存了之後不能修改或刪除。`);
+    if (!ok) return;
+    dbBusy = true; dbButton();
+    $("desMsg").textContent = "存檔中…";
+    try {
+      const res = await fetch(`${DB_URL}/rest/v1/rpc/save_simulation`, {
+        method: "POST",
+        headers: { apikey: DB_KEY, Authorization: `Bearer ${DB_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ p: dbPayload(L) }),
+      });
+      let j = null; try { j = await res.json(); } catch {}
+      if (!res.ok) throw new Error(dbError(j, res.status));
+      if (!j || j.id == null) throw new Error("資料庫的回應不正確，請確認 sim_db_config.js 的網址是模擬資料庫");
+      L.dbId = j.id;
+      if (L.rec) { L.rec.dbId = j.id; persist(); renderRecords(); }
+      $("desMsg").textContent = j.duplicate ? `這個結果之前已經存過了（第 ${j.id} 筆），沒有重複存` : `已存到資料庫：第 ${j.id} 筆`;
+    } catch (e) {
+      $("desMsg").textContent = `存檔失敗：${e.message === "Failed to fetch" ? "連不到模擬資料庫，請檢查網路或 sim_db_config.js 的網址" : e.message}`;
+    } finally { dbBusy = false; dbButton(); }
+  }
+  if ($("desSave")) { $("desSave").onclick = saveToDb; dbButton(); }
 
   // ================= 變異與緩衝實驗（變異越大 → 需要越多緩衝 → 才能維持相同名義產出速率）
   const expCard = $("expCard");

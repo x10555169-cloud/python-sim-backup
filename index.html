@@ -73,6 +73,7 @@
         <label title="整條產線同時最多幾件在做；到上限時起點站先停，等終點做完一件才再投入。空白 = 不限">產線 WIP 上限 <input id="desLineWip" type="number" min="1" max="99" step="1" placeholder="不限"></label>
         <button id="desRun" class="primary" disabled>▶ 跑模擬</button>
         <button id="desReset">還原預設</button>
+        <button id="desSave" disabled>💾 存到資料庫</button>
         <span class="hint" id="desMsg" role="status"></span>
       </div>
       <div class="table-wrap"><table id="desStations"></table></div>
@@ -199,6 +200,7 @@
   </main>
 
   <script src="config.js"></script>
+  <script src="sim_db_config.js"></script>
   <script src="browser_engine.js"></script>
   <script src="app.js"></script>
   <script src="des_ui.js"></script>
